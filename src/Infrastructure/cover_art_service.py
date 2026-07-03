@@ -9,10 +9,14 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-from mutagen.flac import FLAC, Picture
-from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TIT2, TPE1
-from mutagen.mp4 import MP4, MP4Cover
-from mutagen.wave import WAVE
+try:
+    from mutagen.flac import FLAC, Picture
+    from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TIT2, TPE1
+    from mutagen.mp4 import MP4, MP4Cover
+    from mutagen.wave import WAVE
+except Exception:  # pragma: no cover - optional runtime dependency
+    FLAC = Picture = APIC = ID3 = ID3NoHeaderError = TALB = TIT2 = TPE1 = None  # type: ignore[assignment]
+    MP4 = MP4Cover = WAVE = None  # type: ignore[assignment]
 
 from src.Infrastructure.runtime_paths import RuntimePaths
 
@@ -66,6 +70,8 @@ class CoverArtService:
                 status="unsupported",
                 message=f"cover embedding is not supported for {audio_ext or 'unknown'}",
             )
+        if not self._mutagen_available():
+            return CoverArtResult(status="dependency_missing", message="mutagen is required to embed cover art")
 
         if media_summary and bool(media_summary.get("has_cover") or media_summary.get("cover")):
             return CoverArtResult(status="already_present", message="cover art already present")
@@ -113,6 +119,8 @@ class CoverArtService:
                 status="unsupported",
                 message=f"album metadata supplementation is not supported for {audio_ext or 'unknown'}",
             )
+        if not self._mutagen_available():
+            return AlbumMetadataResult(status="dependency_missing", message="mutagen is required to supplement album metadata")
 
         fallback_title, fallback_artist, _ = self._extract_music_identity(audio, source, media_summary or {})
         embedded_title, embedded_artist, embedded_album = self._extract_embedded_audio_tags(audio, media_summary or {})
@@ -215,6 +223,10 @@ class CoverArtService:
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return ""
+
+    @staticmethod
+    def _mutagen_available() -> bool:
+        return all(item is not None for item in (FLAC, Picture, APIC, ID3, ID3NoHeaderError, TALB, TIT2, TPE1, MP4, MP4Cover, WAVE))
 
     def _find_local_cover(
         self,

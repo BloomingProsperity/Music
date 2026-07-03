@@ -1,5 +1,6 @@
 ﻿const path = require("path");
 const {
+  buildOptionalQqNative,
   commandSucceeds,
   ensureDir,
   ensureEmptyDir,
@@ -18,11 +19,15 @@ const pythonExe = resolvePythonExe(rootDir);
 const mainPy = path.join(rootDir, "main.py");
 const assetsDir = path.join(rootDir, "assets");
 const kuwoRuntimeDir = path.join(rootDir, "src", "Infrastructure", "platforms", "kuwo", "runtime_m");
+const qqNativeDir = path.join(rootDir, "src", "Infrastructure", "platforms", "qq", "native");
 const appIcon = path.join(rootDir, "封面", "封面.ico");
 
 ensureFile(mainPy, "main entry");
 ensureDir(assetsDir, "assets directory");
 ensureDir(kuwoRuntimeDir, "kuwo runtime directory");
+ensureDir(qqNativeDir, "qq native directory");
+ensureFile(path.join(qqNativeDir, "qmc2_fast.c"), "qq qmc2 native source");
+buildOptionalQqNative(qqNativeDir);
 ensureFile(path.join(assetsDir, "kugou_key.xz"), "kugou_key.xz");
 ensureFile(path.join(assetsDir, "kudog_native.dll"), "kudog_native.dll");
 ensureFile(path.join(assetsDir, "ffmpeg-win-x86_64-v7.1.exe"), "bundled ffmpeg");
@@ -88,6 +93,8 @@ const pyinstallerArgs = [
   `${path.dirname(appIcon)};封面`,
   "--add-data",
   `${kuwoRuntimeDir};src/Infrastructure/platforms/kuwo/runtime_m`,
+  "--add-data",
+  `${qqNativeDir};src/Infrastructure/platforms/qq/native`,
   mainPy,
 ];
 
