@@ -427,9 +427,9 @@ def run_interactive() -> int:
         pass
     elif platform_id == "qq":
         rules = dict(settings.get("format_rules", {}))
-        rules["mflac"] = prompt_choice("mflac 输出格式 flac/m4a/mp3/wav", str(rules.get("mflac", "flac")), supported_transcode_formats())
-        rules["mgg"] = prompt_choice("mgg 输出格式 flac/m4a/mp3/wav", str(rules.get("mgg", "m4a")), supported_transcode_formats())
-        rules["mmp4"] = prompt_choice("mmp4 输出格式 flac/m4a/mp3/wav", str(rules.get("mmp4", "m4a")), supported_transcode_formats())
+        rules["mflac"] = prompt_choice("mflac 输出格式 flac/m4a/mp3/wav", str(rules.get("mflac", "mp3")), supported_transcode_formats())
+        rules["mgg"] = prompt_choice("mgg 输出格式 flac/m4a/mp3/wav", str(rules.get("mgg", "mp3")), supported_transcode_formats())
+        rules["mmp4"] = prompt_choice("mmp4 输出格式 flac/m4a/mp3/wav", str(rules.get("mmp4", "mp3")), supported_transcode_formats())
         settings["format_rules"] = rules
     elif platform_id == "kuwo":
         settings["format_kwm"] = prompt_choice("kwm 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("format_kwm", "auto")), supported_transcode_formats())
@@ -503,6 +503,8 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
         transcode_group = dec.add_mutually_exclusive_group()
         transcode_group.add_argument("--transcode", dest="transcode_enabled", action="store_true", help="转码为目标格式")
         transcode_group.add_argument("--no-transcode", dest="transcode_enabled", action="store_false", help="不转码，直接输出解密后的原始音频格式")
+        dec.add_argument("--sample-rate", type=int, choices=TRANSCODE_SAMPLE_RATE_OPTIONS, help="转码采样率 Hz")
+        dec.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3/m4a 转码码率 kbps")
         album_group = dec.add_mutually_exclusive_group()
         album_group.add_argument("--supplement-album", dest="supplement_album_metadata", action="store_true", help="补充专辑信息（m4a/wav）")
         album_group.add_argument("--no-supplement-album", dest="supplement_album_metadata", action="store_false", help="不补充专辑信息")

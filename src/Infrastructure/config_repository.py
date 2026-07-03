@@ -22,6 +22,7 @@ DEFAULT_QQ_INPUT = pathlib.Path("")
 DEFAULT_NETEASE_INPUT = pathlib.Path("")
 TRANSCODE_SAMPLE_RATE_OPTIONS = (22050, 32000, 44100, 48000, 88200, 96000)
 TRANSCODE_BITRATE_OPTIONS = (96, 128, 160, 192, 256, 320)
+DEFAULT_QQ_FORMAT_RULES = {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"}
 
 
 def _read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -138,10 +139,10 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "output_dir": str(paths.output_dir / "qq"),
             "process_match": "qqmusic",
             "embed_cover_art": True,
-            "format_rules": {"mflac": "flac", "mgg": "m4a", "mmp4": "m4a"},
+            "format_rules": dict(DEFAULT_QQ_FORMAT_RULES),
             "transcode_sample_rate_hz": None,
-            "transcode_bitrate_kbps": None,
-            "auto_transcode_after_decode": False,
+            "transcode_bitrate_kbps": 320,
+            "auto_transcode_after_decode": True,
         },
         "kuwo": {
             "input_dir": str(DEFAULT_KUWO_INPUT),
@@ -234,13 +235,13 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
 
     format_rules = config["qq"].get("format_rules")
     if not isinstance(format_rules, dict):
-        format_rules = {"mflac": "flac", "mgg": "m4a", "mmp4": "m4a"}
+        format_rules = dict(DEFAULT_QQ_FORMAT_RULES)
     for key in ("mflac", "mgg", "mmp4"):
         value = str(format_rules.get(key) or "").strip().lower()
         if value == "ogg":
             value = "m4a"
         if value not in SUPPORTED_TARGET_FORMATS:
-            value = "m4a" if key != "mflac" else "flac"
+            value = DEFAULT_QQ_FORMAT_RULES[key]
         format_rules[key] = value
     config["qq"]["format_rules"] = format_rules
     config["shared"]["cli_collision_policy"] = str(config["shared"].get("cli_collision_policy", "suffix") or "suffix").lower()
@@ -256,6 +257,8 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     for platform_id in ("qq", "kuwo", "kugou", "netease"):
         config[platform_id]["transcode_sample_rate_hz"] = _normalize_optional_audio_choice(config[platform_id].get("transcode_sample_rate_hz"), TRANSCODE_SAMPLE_RATE_OPTIONS)
         config[platform_id]["transcode_bitrate_kbps"] = _normalize_optional_audio_choice(config[platform_id].get("transcode_bitrate_kbps"), TRANSCODE_BITRATE_OPTIONS)
+    if config["qq"]["transcode_bitrate_kbps"] is None and "mp3" in set(config["qq"]["format_rules"].values()):
+        config["qq"]["transcode_bitrate_kbps"] = 320
     config["kugou"]["target_format_kgma"] = normalize_target_format(config["kugou"].get("target_format_kgma", "auto"))
     config["kugou"]["target_format_kgg"] = normalize_target_format(config["kugou"].get("target_format_kgg", "auto"))
     config["netease"]["target_format_ncm"] = normalize_target_format(config["netease"].get("target_format_ncm", "auto"))

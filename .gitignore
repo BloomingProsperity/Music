@@ -16,10 +16,16 @@ dist_hotfix/
 build_hotfix/
 
 _log/
+_research/
+_work/
 plugins/
 output/
 
 *.exe
+src/Infrastructure/platforms/qq/native/*.dll
+src/Infrastructure/platforms/qq/native/*.dylib
+src/Infrastructure/platforms/qq/native/*.so
+src/Infrastructure/platforms/qq/native/*.sha256
 A_kuwo.code-workspace
 用户反馈/
 

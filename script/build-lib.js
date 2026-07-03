@@ -1,5 +1,6 @@
 ﻿const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 function fail(message) {
@@ -46,6 +47,29 @@ function commandSucceeds(command, args, options = {}) {
     ...options,
   });
   return result.status === 0;
+}
+
+function buildOptionalQqNative(qqNativeDir) {
+  const sourcePath = path.join(qqNativeDir, "qmc2_fast.c");
+  const targetName = process.platform === "win32" ? "qmc2_fast.dll" : process.platform === "darwin" ? "libqmc2_fast.dylib" : "libqmc2_fast.so";
+  const targetPath = path.join(qqNativeDir, targetName);
+  const signaturePath = `${targetPath}.sha256`;
+  const args = ["-O3", "-shared", "-o", targetPath, sourcePath];
+  if (process.platform !== "win32") {
+    args.splice(2, 0, "-fPIC");
+    args.push("-lm");
+  }
+  const result = spawnSync("gcc", args, {
+    encoding: "utf8",
+    shell: false,
+  });
+  if (result.status !== 0) {
+    console.warn("Skipping optional QQ qmc2 native build; gcc is unavailable or failed.");
+    return null;
+  }
+  const digest = crypto.createHash("sha256").update(fs.readFileSync(targetPath)).digest("hex");
+  fs.writeFileSync(signaturePath, `${digest}  ${targetName}\n`, "utf8");
+  return targetPath;
 }
 
 function capture(command, args, options = {}) {
@@ -148,6 +172,7 @@ function locateIscc() {
 }
 
 module.exports = {
+  buildOptionalQqNative,
   capture,
   cleanDir,
   commandSucceeds,

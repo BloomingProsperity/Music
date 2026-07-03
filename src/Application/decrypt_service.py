@@ -429,7 +429,7 @@ def _resolve_batch_transcode_choice(
     stopped_early: bool,
 ) -> tuple[bool, list[_PreparedArtifact]]:
     pending = [item for item in prepared_artifacts if _artifact_needs_transcode(item.desired_target, item.detected_container)]
-    if failed_count > 0 or stopped_early:
+    if stopped_early:
         logger.info(
             "batch_transcode_skipped: pending=%d failed=%d stopped=%s",
             len(pending),
@@ -437,6 +437,8 @@ def _resolve_batch_transcode_choice(
             stopped_early,
         )
         return False, pending
+    if failed_count > 0:
+        logger.info("batch_transcode_partial_after_failures: pending=%d failed=%d", len(pending), failed_count)
 
     payload = {
         "platform_id": config.platform_id,

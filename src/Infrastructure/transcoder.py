@@ -104,6 +104,8 @@ def probe_audio_container(input_path: pathlib.Path) -> str | None:
         check=False,
         **_subprocess_window_kwargs(),
     )
+    if completed.returncode != 0:
+        return None
     stderr = completed.stderr or ""
     marker = "Input #0, "
     start = stderr.find(marker)
@@ -297,10 +299,14 @@ def summary_to_log(summary: dict[str, Any]) -> str:
     ).strip()
 
 
-def _codec_args(target_format: str) -> list[str]:
+def _codec_args(target_format: str, *, bitrate_kbps: int | None = None) -> list[str]:
     if target_format == "mp3":
+        if bitrate_kbps:
+            return ["-codec:a", "libmp3lame", "-b:a", f"{int(bitrate_kbps)}k"]
         return ["-codec:a", "libmp3lame", "-q:a", "2"]
     if target_format == "m4a":
+        if bitrate_kbps:
+            return ["-codec:a", "aac", "-b:a", f"{int(bitrate_kbps)}k"]
         return ["-codec:a", "aac", "-b:a", "256k"]
     if target_format == "wav":
         return ["-codec:a", "pcm_s16le"]
@@ -324,8 +330,6 @@ def _audio_option_args(
     args: list[str] = []
     if sample_rate_hz:
         args.extend(["-ar", str(int(sample_rate_hz))])
-    if bitrate_kbps and target_format in {"mp3", "m4a"}:
-        args.extend(["-b:a", f"{int(bitrate_kbps)}k"])
     return args
 
 
@@ -352,7 +356,7 @@ def transcode_file(
         "-i",
         str(input_path),
         *_stream_selection_args(target_format),
-        *_codec_args(target_format),
+        *_codec_args(target_format, bitrate_kbps=bitrate_kbps),
         *_audio_option_args(
             target_format,
             sample_rate_hz=sample_rate_hz,
