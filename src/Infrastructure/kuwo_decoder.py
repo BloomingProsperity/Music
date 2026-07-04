@@ -84,7 +84,9 @@ def decode_kwm_file(input_path: pathlib.Path, output_dir: pathlib.Path) -> dict:
                 decoded_bytes += len(block)
 
         detected_container, recognition_stage = detect_audio_container(temp_output)
-        final_ext = detected_container or "bin"
+        if detected_container == "bin":
+            raise KwmDecodeError("unrecognized_audio_container")
+        final_ext = detected_container
         final_output = output_dir / f"{_output_basename(input_path)}.{final_ext}"
         if final_output.exists():
             final_output.unlink()

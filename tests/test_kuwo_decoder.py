@@ -74,3 +74,21 @@ def test_decode_kwm_file_rejects_too_small_files(tmp_path: pathlib.Path) -> None
 
     with pytest.raises(KwmDecodeError):
         decode_kwm_file(kwm_path, tmp_path / "out")
+
+
+def test_decode_kwm_file_rejects_unrecognized_payload_without_publishing_output(tmp_path: pathlib.Path) -> None:
+    key = bytes(range(1, 33))
+    payload = bytearray(b"not an audio container")
+    payload.extend(bytes((index * 11 + 7) & 0xFF for index in range(32 * 468 - len(payload))))
+    last_chunk_start = 32 * 467
+    swapped_key = _swap_halves(key)
+    payload[last_chunk_start:last_chunk_start + 32] = bytes(a ^ b for a, b in zip(swapped_key, key))
+    encrypted = _xor_with_key(bytes(payload), key)
+    kwm_path = tmp_path / "bad-audio.kwm"
+    output_dir = tmp_path / "out"
+    kwm_path.write_bytes(b"\0" * 1024 + encrypted)
+
+    with pytest.raises(KwmDecodeError, match="unrecognized_audio_container"):
+        decode_kwm_file(kwm_path, output_dir)
+
+    assert not list(output_dir.glob("*"))

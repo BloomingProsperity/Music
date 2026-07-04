@@ -34,7 +34,22 @@ def test_minimum_width_keeps_qq_form_inside_scroll_viewport() -> None:
     assert options is not None
 
     assert form.width() <= scroll.viewport().width()
-    assert options.width() >= options.sizeHint().width()
+    assert scroll.horizontalScrollBar().maximum() == 0
+    assert options.width() >= 320
+
+
+def test_qq_settings_fit_vertically_without_scrolling_at_common_window_size() -> None:
+    app = _app()
+    window = MainWindow()
+    window.resize(1366, 720)
+    window.show()
+    app.processEvents()
+
+    page = window.pages["qq"]
+    scroll = page.findChild(QScrollArea, "FormScroll")
+    assert scroll is not None
+
+    assert scroll.verticalScrollBar().maximum() == 0
 
 
 class _ImmediateThread:
@@ -321,7 +336,7 @@ def test_sidebar_shows_default_version_and_update_button() -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
 
     assert version is not None
-    assert version.text() == "0.04"
+    assert version.text() == "0.05"
     assert update_button is not None
     assert update_button.text() == "更新系统"
 
