@@ -3,10 +3,13 @@ from __future__ import annotations
 import base64
 import io
 import json
+import lzma
 import os
 import pathlib
 import subprocess
+import struct
 import wave
+from types import SimpleNamespace
 
 import pytest
 from Crypto.Cipher import AES
@@ -15,9 +18,11 @@ from Crypto.Util.Padding import pad
 from src.Application.decrypt_service import run_batch
 from src.Application.models import BatchRunConfig
 from src.Infrastructure.platforms.kuwo.adapter import KuwoPlatformAdapter
+from src.Infrastructure.platforms.kugou.adapter import KugouPlatformAdapter
 from src.Infrastructure.platforms.netease.adapter import NeteasePlatformAdapter
 from src.Infrastructure.runtime_paths import RuntimePaths
 from src.Infrastructure.transcoder import resolve_ffmpeg_path
+from src.Infrastructure import kugou_decoder
 
 
 CORE_KEY = bytes.fromhex("687A4852416D736F356B496E62617857")
@@ -103,6 +108,35 @@ def _write_kwm_fixture(path: pathlib.Path, payload: bytes) -> None:
     swapped_key = key[16:32] + key[:16]
     prepared[key_probe_offset:key_probe_offset + 32] = bytes(a ^ b for a, b in zip(swapped_key, key))
     path.write_bytes(b"\0" * 1024 + _xor_kwm(bytes(prepared), key))
+
+
+def _encrypt_kugou_v3_payload(payload: bytes, own_key: bytes, pub_key: bytes) -> bytes:
+    own_tables = kugou_decoder._build_own_transform_tables(own_key)
+    pub_tables = kugou_decoder._build_pub_transform_tables()
+    inverse_own_tables = []
+    for table in own_tables:
+        inverse = bytearray(256)
+        for source, transformed in enumerate(table):
+            inverse[transformed] = source
+        inverse_own_tables.append(bytes(inverse))
+
+    encrypted = bytearray(len(payload))
+    for position, value in enumerate(payload):
+        pub_index = position // kugou_decoder.PUB_KEY_LEN_MAGNIFICATION
+        mask = pub_tables[position % len(pub_tables)][pub_key[pub_index]]
+        encrypted[position] = inverse_own_tables[position % len(inverse_own_tables)][value ^ mask]
+    return bytes(encrypted)
+
+
+def _write_kugou_v3_fixture(path: pathlib.Path, key_path: pathlib.Path, payload: bytes) -> None:
+    own_key = bytes((index * 11 + 7) & 0xFF for index in range(kugou_decoder.OWN_KEY_LEN - 1)) + b"\0"
+    pub_key = bytes((index * 17 + 5) & 0xFF for index in range((len(payload) + 15) // 16 + 8))
+    key_path.write_bytes(lzma.compress(pub_key))
+    header = bytearray(kugou_decoder.HEADER_LEN)
+    header[:16] = kugou_decoder.KGM_MAGIC
+    struct.pack_into("<III", header, 0x10, kugou_decoder.HEADER_LEN, 3, 0)
+    header[0x1C:0x2C] = own_key[:16]
+    path.write_bytes(bytes(header) + _encrypt_kugou_v3_payload(payload, own_key, pub_key))
 
 
 def _runtime_paths_for_test(root: pathlib.Path) -> RuntimePaths:
@@ -204,6 +238,27 @@ def test_kuwo_batch_decrypts_and_transcodes_synthetic_kwm_to_decodable_mp3(tmp_p
         KuwoPlatformAdapter(),
         source,
         {"target_format_kwm": "mp3"},
+    )
+
+    _assert_decodable_mp3(mp3_path, ffmpeg_path)
+
+
+def test_kugou_batch_decrypts_and_transcodes_synthetic_kgm_to_decodable_mp3(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ffmpeg_path = resolve_ffmpeg_path(RuntimePaths.discover())
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg executable is not available")
+    source = tmp_path / "local_e2e.kgm"
+    key_path = tmp_path / "kugou_key.xz"
+    _write_kugou_v3_fixture(source, key_path, _wav_payload())
+    monkeypatch.setattr(kugou_decoder, "get_native_backend", lambda: SimpleNamespace(available=False, dll_path=None))
+
+    mp3_path = _run_batch_to_mp3(
+        tmp_path,
+        monkeypatch,
+        "kugou",
+        KugouPlatformAdapter(),
+        source,
+        {"target_format_kgma": "mp3", "key_file": str(key_path)},
     )
 
     _assert_decodable_mp3(mp3_path, ffmpeg_path)
