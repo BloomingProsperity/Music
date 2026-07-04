@@ -91,9 +91,13 @@ def auto_find_kgg_db_path() -> pathlib.Path | None:
 def iter_kuwo_input_candidates() -> list[pathlib.Path]:
     home = pathlib.Path.home()
     candidates = [
+        pathlib.Path(r"C:\KwDownload\song"),
         pathlib.Path(r"C:\KwDownload"),
+        home / "KwDownload" / "song",
         home / "KwDownload",
+        home / "Music" / "KwDownload" / "song",
         home / "Music" / "KwDownload",
+        home / "Downloads" / "KwDownload" / "song",
         home / "Downloads" / "KwDownload",
         home / "Music" / "酷我音乐",
         home / "Downloads" / "酷我音乐",

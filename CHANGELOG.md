@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.18 - 2026-07-04
+
+- 酷我默认输入目录优先识别 `C:\KwDownload\song`。
+
 ## 0.17 - 2026-07-04
 
 - 自动识别酷我默认下载目录 `C:\KwDownload`。

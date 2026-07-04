@@ -6,7 +6,7 @@ import unittest
 import json
 from unittest.mock import patch
 
-from src.Infrastructure.config_repository import auto_find_kuwo_input_path, load_config
+from src.Infrastructure.config_repository import auto_find_kuwo_input_path, iter_kuwo_input_candidates, load_config
 from src.Infrastructure.runtime_paths import RuntimePaths
 
 
@@ -60,6 +60,14 @@ class ConfigRepositoryTests(unittest.TestCase):
 
             with patch("src.Infrastructure.config_repository.iter_kuwo_input_candidates", return_value=[empty, download]):
                 self.assertEqual(auto_find_kuwo_input_path(), download)
+
+    def test_kuwo_input_candidates_prioritize_song_directory(self) -> None:
+        candidates = iter_kuwo_input_candidates()
+
+        self.assertLess(
+            candidates.index(pathlib.Path(r"C:\KwDownload\song")),
+            candidates.index(pathlib.Path(r"C:\KwDownload")),
+        )
 
     def test_load_config_uses_detected_kuwo_input_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
