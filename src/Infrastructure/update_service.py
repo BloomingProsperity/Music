@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
-APP_VERSION = "0.03"
+APP_VERSION = "0.04"
 VERSION_MARKER_FILE = ".qkk-version"
 UPDATE_REPO_URL = "https://github.com/BloomingProsperity/Music.git"
 UPDATE_BRANCH = "music-gateway"

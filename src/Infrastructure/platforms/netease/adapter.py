@@ -18,7 +18,7 @@ WHITELIST = {"flac", "m4a", "mp3", "wav"}
 class NeteasePlatformAdapter:
     platform_id: str = "netease"
     display_name: str = "网易云音乐"
-    _raw_format_cache: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _raw_format_cache: dict[str, str | None] = field(default_factory=dict, init=False, repr=False)
 
     def requires_running_process(self) -> bool:
         return False
@@ -39,23 +39,25 @@ class NeteasePlatformAdapter:
     def output_basename(self, input_path: pathlib.Path) -> str:
         return input_path.stem
 
-    def _raw_format(self, input_path: pathlib.Path) -> str:
+    def _raw_format(self, input_path: pathlib.Path) -> str | None:
         cache_key = str(input_path.resolve()).lower()
-        cached = self._raw_format_cache.get(cache_key)
-        if cached:
-            return cached
+        if cache_key in self._raw_format_cache:
+            return self._raw_format_cache[cache_key]
         try:
             raw_format = read_ncm_metadata(input_path).raw_format
         except Exception:
             try:
                 ncm = NeteaseCloudMusicFile(input_path).decrypt()
-                raw_format = str(getattr(ncm.music_metadata, "format", "mp3") or "mp3").strip().lower()
+                raw_format = str(getattr(ncm.music_metadata, "format", "") or "").strip().lower()
             except Exception:
-                raw_format = "mp3"
+                raw_format = None
+        if raw_format is None:
+            self._raw_format_cache[cache_key] = None
+            return None
         if raw_format == "ogg":
             raw_format = "m4a"
         if raw_format not in WHITELIST:
-            raw_format = "mp3"
+            raw_format = None
         self._raw_format_cache[cache_key] = raw_format
         return raw_format
 
@@ -65,7 +67,9 @@ class NeteasePlatformAdapter:
 
     def desired_target_format(self, input_path: pathlib.Path, settings: dict) -> str:
         target = str(settings.get("target_format_ncm", "auto") or "auto").strip().lower()
-        return self._raw_format(input_path) if target == "auto" else target
+        if target != "auto":
+            return target
+        return self._raw_format(input_path) or "auto"
 
     def decrypt_one(self, input_path: pathlib.Path, work_dir: pathlib.Path, settings: dict, *, log_dir: pathlib.Path) -> dict:
         try:
@@ -75,7 +79,6 @@ class NeteasePlatformAdapter:
 
         started = time.perf_counter()
         ncm = NeteaseCloudMusicFile(input_path).decrypt()
-        raw_format = self._raw_format(input_path)
         output_hint = work_dir / input_path.stem
         dumped = ncm.dump_music(output_hint)
         final_work_path = pathlib.Path(dumped)

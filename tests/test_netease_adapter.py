@@ -51,3 +51,22 @@ def test_netease_adapter_predicts_extension_from_local_metadata(tmp_path: pathli
     assert adapter.predicted_extension(source, {"target_format_ncm": "auto"}) == "flac"
     assert adapter.desired_target_format(source, {"target_format_ncm": "auto"}) == "flac"
     assert adapter.predicted_extension(source, {"target_format_ncm": "mp3"}) == "mp3"
+
+
+def test_netease_adapter_keeps_auto_when_metadata_format_is_unavailable(tmp_path: pathlib.Path, monkeypatch) -> None:
+    adapter = NeteasePlatformAdapter()
+    source = tmp_path / "song.ncm"
+    source.write_bytes(b"ncm")
+
+    class BrokenNeteaseFile:
+        def __init__(self, _path: pathlib.Path) -> None:
+            pass
+
+        def decrypt(self):
+            raise RuntimeError("metadata unavailable")
+
+    monkeypatch.setattr("src.Infrastructure.platforms.netease.adapter.read_ncm_metadata", lambda _path: (_ for _ in ()).throw(RuntimeError("bad metadata")))
+    monkeypatch.setattr("src.Infrastructure.platforms.netease.adapter.NeteaseCloudMusicFile", BrokenNeteaseFile)
+
+    assert adapter.predicted_extension(source, {"target_format_ncm": "auto"}) is None
+    assert adapter.desired_target_format(source, {"target_format_ncm": "auto"}) == "auto"
