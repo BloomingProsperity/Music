@@ -448,6 +448,13 @@ def _filename_basename(filename: str) -> str:
     return str(filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
 
 
+def _settings_bool(settings: dict, key: str, default: bool) -> bool:
+    value = settings.get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def configure_windows_process_api(kernel32, psapi, memory_info_type=None) -> None:
     kernel32.OpenProcess.argtypes = [ctypes.wintypes.DWORD, ctypes.wintypes.BOOL, ctypes.wintypes.DWORD]
     kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
@@ -735,6 +742,9 @@ class QQOfflineMusicExDecryptor:
         cached = self._load_cached_ekey(cache_key, settings)
         if cached:
             return cached
+
+        if not _settings_bool(settings, "qq_fetch_missing_ekey", True):
+            return None
 
         cookie_info = self.cookie_provider.get_cookie()
         if not cookie_info:

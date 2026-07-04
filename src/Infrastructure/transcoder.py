@@ -62,10 +62,32 @@ def resolve_ffmpeg_path(paths: RuntimePaths | None = None) -> pathlib.Path | Non
     return None
 
 
+def resolve_ffprobe_path(paths: RuntimePaths | None = None) -> pathlib.Path | None:
+    paths = paths or RuntimePaths.discover()
+    candidates: list[pathlib.Path] = []
+    for pattern in ("ffprobe*.exe", "ffprobe.exe"):
+        candidates.extend(sorted(paths.assets_dir.glob(pattern)))
+        candidates.extend(sorted((paths.bundle_dir / "assets").glob(pattern)))
+        candidates.extend(sorted((paths.root_dir / "assets").glob(pattern)))
+    ffmpeg_path = resolve_ffmpeg_path(paths)
+    if ffmpeg_path is not None:
+        candidates.append(ffmpeg_path.with_name(ffmpeg_path.name.replace("ffmpeg", "ffprobe", 1)))
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
 def fast_detect_container(path: pathlib.Path) -> str:
     if not path.exists() or path.stat().st_size < 4:
         return "bin"
-    head = path.read_bytes()[:64]
+    with path.open("rb") as source:
+        head = source.read(64)
     if head.startswith(b"fLaC"):
         return "flac"
     if head.startswith(b"OggS"):
@@ -197,14 +219,51 @@ def _probe_media_summary_with_mutagen(input_path: pathlib.Path, container_hint: 
 def probe_media_summary(input_path: pathlib.Path) -> dict[str, Any]:
     paths = RuntimePaths.discover()
     ffmpeg_path = resolve_ffmpeg_path(paths)
+    ffprobe_path = resolve_ffprobe_path(paths)
     fast_container = fast_detect_container(input_path)
     mutagen_summary = _probe_media_summary_with_mutagen(input_path, fast_container)
-    if ffmpeg_path is None or not input_path.exists():
+    if not input_path.exists():
         if mutagen_summary is not None:
             return mutagen_summary
         return {
             "path": str(input_path),
-            "probe_source": "missing_ffmpeg_or_input",
+            "probe_source": "missing_input",
+            "container": fast_container,
+            "audio_streams": 0,
+            "video_streams": 0,
+            "cover": False,
+            "cover_codec": "",
+            "metadata": {},
+        }
+    if ffprobe_path is None:
+        if mutagen_summary is not None:
+            return mutagen_summary
+        if fast_container != "bin":
+            return {
+                "path": str(input_path),
+                "probe_source": "fast_header",
+                "container": fast_container,
+                "audio_streams": 1,
+                "video_streams": 0,
+                "cover": False,
+                "cover_codec": "",
+                "metadata": {},
+            }
+        probed_container = probe_audio_container(input_path) if ffmpeg_path is not None else None
+        if probed_container:
+            return {
+                "path": str(input_path),
+                "probe_source": "ffmpeg_decode",
+                "container": probed_container,
+                "audio_streams": 1,
+                "video_streams": 0,
+                "cover": False,
+                "cover_codec": "",
+                "metadata": {},
+            }
+        return {
+            "path": str(input_path),
+            "probe_source": "missing_ffprobe",
             "container": fast_container,
             "audio_streams": 0,
             "video_streams": 0,
@@ -215,9 +274,46 @@ def probe_media_summary(input_path: pathlib.Path) -> dict[str, Any]:
     fd, temp_name = tempfile.mkstemp(suffix=".json")
     os.close(fd)
     pathlib.Path(temp_name).unlink(missing_ok=True)
-    try:
+
+    def _decode_fallback() -> dict[str, Any] | None:
+        if ffmpeg_path is None:
+            return None
         command = [
             str(ffmpeg_path),
+            "-v",
+            "error",
+            "-i",
+            str(input_path),
+            "-f",
+            "null",
+            "NUL",
+        ]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            **_subprocess_window_kwargs(),
+        )
+        if completed.returncode != 0:
+            return None
+        metadata = dict((mutagen_summary or {}).get("metadata") or {})
+        return {
+            "path": str(input_path),
+            "probe_source": "ffmpeg_decode",
+            "container": fast_container,
+            "audio_streams": 1 if fast_container != "bin" else 0,
+            "video_streams": 1 if bool((mutagen_summary or {}).get("cover")) else 0,
+            "cover": bool((mutagen_summary or {}).get("cover")),
+            "cover_codec": str((mutagen_summary or {}).get("cover_codec") or ""),
+            "metadata": metadata,
+        }
+
+    try:
+        command = [
+            str(ffprobe_path),
             "-hide_banner",
             "-loglevel",
             "error",
@@ -242,6 +338,9 @@ def probe_media_summary(input_path: pathlib.Path) -> dict[str, Any]:
         if completed.returncode != 0 or not temp_path.exists():
             if mutagen_summary is not None:
                 return mutagen_summary
+            decoded_summary = _decode_fallback()
+            if decoded_summary is not None:
+                return decoded_summary
             return {
                 "path": str(input_path),
                 "probe_source": "ffprobe_failed",

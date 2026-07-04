@@ -118,6 +118,14 @@ def _normalize_optional_audio_choice(value: Any, allowed: tuple[int, ...]) -> in
     return normalized if normalized in allowed else None
 
 
+def _normalize_config_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     paths.ensure_runtime_dirs()
     root = _read_json(paths.plugins_config)
@@ -143,6 +151,10 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "transcode_sample_rate_hz": None,
             "transcode_bitrate_kbps": 320,
             "auto_transcode_after_decode": True,
+            "qq_offline_musicex_enabled": True,
+            "qq_fetch_missing_ekey": True,
+            "qq_cache_ekeys": True,
+            "qq_legacy_frida_enabled": False,
         },
         "kuwo": {
             "input_dir": str(DEFAULT_KUWO_INPUT),
@@ -259,6 +271,13 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
         config[platform_id]["transcode_bitrate_kbps"] = _normalize_optional_audio_choice(config[platform_id].get("transcode_bitrate_kbps"), TRANSCODE_BITRATE_OPTIONS)
     if config["qq"]["transcode_bitrate_kbps"] is None and "mp3" in set(config["qq"]["format_rules"].values()):
         config["qq"]["transcode_bitrate_kbps"] = 320
+    for key, default in (
+        ("qq_offline_musicex_enabled", True),
+        ("qq_fetch_missing_ekey", True),
+        ("qq_cache_ekeys", True),
+        ("qq_legacy_frida_enabled", False),
+    ):
+        config["qq"][key] = _normalize_config_bool(config["qq"].get(key), default)
     config["kugou"]["target_format_kgma"] = normalize_target_format(config["kugou"].get("target_format_kgma", "auto"))
     config["kugou"]["target_format_kgg"] = normalize_target_format(config["kugou"].get("target_format_kgg", "auto"))
     config["netease"]["target_format_ncm"] = normalize_target_format(config["netease"].get("target_format_ncm", "auto"))

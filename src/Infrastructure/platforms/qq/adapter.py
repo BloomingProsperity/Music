@@ -22,6 +22,13 @@ WHITELIST = {'flac', 'm4a', 'mp3', 'wav'}
 logger = logging.getLogger('qkkdecrypt.infrastructure.platforms.qq')
 
 
+def _settings_bool(settings: dict, key: str, default: bool) -> bool:
+    value = settings.get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 @dataclass(slots=True)
 class QQPlatformAdapter:
     platform_id: str = 'qq'
@@ -63,14 +70,16 @@ class QQPlatformAdapter:
             pass
 
     def requires_running_process(self) -> bool:
-        return True
+        return False
 
     def validate_runtime(self, settings: dict) -> tuple[bool, str | None]:
+        if not _settings_bool(settings, 'qq_legacy_frida_enabled', False):
+            return True, None
         process_match = str(settings.get('process_match', 'qqmusic') or 'qqmusic')
         info = find_process_by_name('QQMusic.exe')
         if info is None:
             info = find_process_by_substring(process_match)
-        return (info is not None, None if info is not None else 'QQ?????')
+        return (info is not None, None if info is not None else '未检测到 QQ 音乐进程')
 
     def collect_files(self, input_path: pathlib.Path, recursive: bool) -> list[pathlib.Path]:
         if input_path.is_file():
@@ -149,6 +158,12 @@ class QQPlatformAdapter:
                     'total_sec': elapsed,
                 }
                 return offline_detail
+
+        if not _settings_bool(settings, 'qq_legacy_frida_enabled', False):
+            raise RuntimeError(
+                'qq_local_ekey_missing: QQ 本地解码缺少可用 ekey；'
+                '请先缓存该文件 ekey，或临时打开 QQ 音乐补取 key 后重试'
+            )
 
         FridaDecryptGateway, pick_safe_tmp_dir = self._load_runtime()
         if self._gateway is None:

@@ -70,7 +70,7 @@ class QQDecryptArtifactTests(unittest.TestCase):
             adapter._gateway = PassthroughGateway()  # type: ignore[assignment]
 
             with self.assertRaisesRegex(RuntimeError, "unsupported_qq_musicex_variant"):
-                adapter.decrypt_one(source, work_dir, {}, log_dir=root)
+                adapter.decrypt_one(source, work_dir, {"qq_legacy_frida_enabled": True}, log_dir=root)
 
             self.assertFalse((work_dir / "song.flac").exists())
             self.assertFalse(any(safe_dir.glob("qqsrc_*")))

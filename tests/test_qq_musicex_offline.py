@@ -149,6 +149,20 @@ class QQMusicExOfflineTests(unittest.TestCase):
         self.assertTrue(any("F0M000first" in name for name in cached))
         self.assertTrue(any("M800second" in name for name in cached))
 
+    def test_fetch_missing_ekey_can_be_disabled_for_cache_only_local_mode(self) -> None:
+        class CookieProvider:
+            def get_cookie(self):
+                raise AssertionError("QQ process cookie should not be read when ekey fetch is disabled")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            decryptor = musicex_offline.QQOfflineMusicExDecryptor(
+                cookie_provider=CookieProvider(),
+                cache_dir=pathlib.Path(temp_dir),
+            )
+            meta = QQEncryptedTail("musicex", "001song", "F0M000song.mflac", 1024)
+
+            self.assertIsNone(decryptor._resolve_ekey(meta, {"qq_fetch_missing_ekey": False}))
+
     def test_relative_ekey_cache_dir_override_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             default_cache = pathlib.Path(temp_dir) / "default-cache"
@@ -407,6 +421,56 @@ class QQMusicExOfflineTests(unittest.TestCase):
             self.assertEqual(detail["backend"], "qmc2:musicex")
             self.assertEqual(detail["detected_container"], "flac")
             self.assertEqual(pathlib.Path(detail["output_path"]).read_bytes()[:4], b"fLaC")
+
+    def test_adapter_defaults_to_local_mode_without_qqmusic_process(self) -> None:
+        adapter = QQPlatformAdapter()
+
+        with (
+            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_name", return_value=None),
+            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_substring", return_value=None),
+        ):
+            self.assertFalse(adapter.requires_running_process())
+            self.assertEqual(adapter.validate_runtime({}), (True, None))
+
+    def test_adapter_checks_qqmusic_process_only_when_legacy_frida_is_enabled(self) -> None:
+        adapter = QQPlatformAdapter()
+
+        with (
+            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_name", return_value=None),
+            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_substring", return_value=None),
+        ):
+            ok, reason = adapter.validate_runtime({"qq_legacy_frida_enabled": True})
+
+        self.assertFalse(ok)
+        self.assertEqual(reason, "未检测到 QQ 音乐进程")
+
+    def test_adapter_does_not_fallback_to_frida_when_local_key_is_missing_by_default(self) -> None:
+        class OfflineDecryptor:
+            def decrypt_to_file(
+                self,
+                _input_path: pathlib.Path,
+                _output_path: pathlib.Path,
+                _settings: dict,
+                *,
+                log_dir: pathlib.Path,
+            ) -> dict | None:
+                return None
+
+        class TestAdapter(QQPlatformAdapter):
+            def _ensure_offline_decryptor(self):
+                return OfflineDecryptor()
+
+            def _load_runtime(self):
+                raise AssertionError("frida gateway should stay disabled unless qq_legacy_frida_enabled is true")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            source = root / "song.mflac"
+            source.write_bytes(_musicex_fixture())
+            adapter = TestAdapter()
+
+            with self.assertRaisesRegex(RuntimeError, "qq_local_ekey_missing"):
+                adapter.decrypt_one(source, root / "work", {}, log_dir=root)
 
 
 if __name__ == "__main__":
