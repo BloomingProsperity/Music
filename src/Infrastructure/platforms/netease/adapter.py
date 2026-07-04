@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from ncmdump import NeteaseCloudMusicFile
 
+from src.Infrastructure.netease_decoder import decode_ncm_file, read_ncm_metadata
 from src.Infrastructure.transcoder import detect_audio_container
 
 
@@ -44,10 +45,13 @@ class NeteasePlatformAdapter:
         if cached:
             return cached
         try:
-            ncm = NeteaseCloudMusicFile(input_path).decrypt()
-            raw_format = str(getattr(ncm.music_metadata, "format", "mp3") or "mp3").strip().lower()
+            raw_format = read_ncm_metadata(input_path).raw_format
         except Exception:
-            raw_format = "mp3"
+            try:
+                ncm = NeteaseCloudMusicFile(input_path).decrypt()
+                raw_format = str(getattr(ncm.music_metadata, "format", "mp3") or "mp3").strip().lower()
+            except Exception:
+                raw_format = "mp3"
         if raw_format == "ogg":
             raw_format = "m4a"
         if raw_format not in WHITELIST:
@@ -64,6 +68,11 @@ class NeteasePlatformAdapter:
         return self._raw_format(input_path) if target == "auto" else target
 
     def decrypt_one(self, input_path: pathlib.Path, work_dir: pathlib.Path, settings: dict, *, log_dir: pathlib.Path) -> dict:
+        try:
+            return decode_ncm_file(input_path, work_dir)
+        except Exception:
+            pass
+
         started = time.perf_counter()
         ncm = NeteaseCloudMusicFile(input_path).decrypt()
         raw_format = self._raw_format(input_path)

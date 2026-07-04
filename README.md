@@ -41,8 +41,34 @@
   - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
 - `网易云音乐`
   - 支持 `.ncm`
-  - 文件级离线解密
+  - 文件级离线解密，默认使用本地流式解码，减少大文件内存占用
   - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
+- `酷我音乐`
+  - 实验支持 `.kwm`
+  - 当前已接入命令行与底层 adapter，UI 仍保持暂不可用，等待真实样本验证后再开放
+  - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
+
+## 一键部署到另一台 Windows 电脑
+
+在另一台电脑打开 PowerShell，执行下面一条命令即可下载当前升级分支、创建虚拟环境、安装依赖、创建桌面快捷方式并启动 UI：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BloomingProsperity/Music/codex/platforms-ncm-kuwo-upgrade/deploy.ps1 | iex"
+```
+
+如果电脑没有 Python 3.10+，脚本会优先尝试通过 Windows 自带的 `winget` 自动安装 Python 3.12。
+
+默认安装到：
+
+```text
+%USERPROFILE%\QKKDecrypt
+```
+
+以后可双击桌面上的 `QKKDecrypt UI`，也可以手动运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\QKKDecrypt\run-ui.ps1"
+```
 
 ## 批量转码
 
