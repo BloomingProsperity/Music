@@ -52,6 +52,26 @@
 python main.py transcode-batch --input D:\music --output D:\mp3 --rule 全部:mp3::320 --max-workers 2
 ```
 
+## 一键部署到另一台 Windows 电脑
+
+在另一台电脑打开 PowerShell，执行下面一条命令即可下载当前分支、创建虚拟环境、安装依赖、创建桌面快捷方式并启动 UI：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BloomingProsperity/Music/codex/one-click-deploy/deploy.ps1 | iex"
+```
+
+默认安装到：
+
+```text
+%USERPROFILE%\QKKDecrypt
+```
+
+以后可双击桌面上的 `QKKDecrypt UI`，也可以手动运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\QKKDecrypt\run-ui.ps1"
+```
+
 如果源文件在 U 盘或移动硬盘，推荐把输出目录放到 C 盘，减少移动盘反复读写：
 
 ```powershell
