@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -200,6 +201,7 @@ def _verify_platform_input(
     settings: dict[str, Any],
     recursive: bool,
     ffmpeg_path: pathlib.Path | None,
+    fresh: bool = False,
 ) -> SamplePlatformResult:
     candidates = _collect_candidates(adapter, input_path, recursive)
     if not candidates:
@@ -217,6 +219,11 @@ def _verify_platform_input(
         events.append((event_name, dict(payload)))
 
     platform_output = output_dir / platform_id
+    if fresh and platform_output.exists():
+        if platform_output.is_dir():
+            shutil.rmtree(platform_output)
+        else:
+            platform_output.unlink()
     config = BatchRunConfig(
         platform_id=platform_id,
         input_path=input_path,
@@ -257,6 +264,7 @@ def run_sample_verification(
     recursive: bool = True,
     max_workers: int = 2,
     bitrate_kbps: int = 320,
+    fresh: bool = False,
 ) -> SampleVerificationSummary:
     roots = _dedupe_paths(input_paths)
     output_dir = output_dir.expanduser().resolve()
@@ -283,6 +291,7 @@ def run_sample_verification(
                     settings=settings,
                     recursive=recursive,
                     ffmpeg_path=ffmpeg_path,
+                    fresh=fresh,
                 )
             )
 

@@ -1,7 +1,8 @@
 param(
     [string]$InstallDir = "$env:USERPROFILE\QKKDecrypt",
-    [string]$RepoZipUrl = "https://github.com/BloomingProsperity/Music/archive/refs/heads/music-gateway.zip",
+    [string]$RepoZipUrl = "",
     [string]$TreeApiUrl = "",
+    [string]$RawContentBaseUrl = "",
     [switch]$NoLaunch,
     [switch]$NoShortcut,
     [switch]$SkipDependencyInstall
@@ -10,6 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $Branch = "music-gateway"
+$BundledFfmpegPath = "assets/ffmpeg-win-x86_64-v7.1.exe"
 
 function Write-Step {
     param([string]$Message)
@@ -160,6 +162,20 @@ function Get-DefaultTreeApiUrl {
     return "https://api.github.com/repos/BloomingProsperity/Music/git/trees/$encodedBranch`?recursive=1"
 }
 
+function Get-DefaultRawContentBaseUrl {
+    return "https://raw.githubusercontent.com/BloomingProsperity/Music/$Branch"
+}
+
+function ConvertTo-RawContentUrl {
+    param(
+        [string]$BaseUrl,
+        [string]$RelativePath
+    )
+    $segments = $RelativePath -split "/"
+    $encoded = $segments | ForEach-Object { [uri]::EscapeDataString($_) }
+    return $BaseUrl.TrimEnd("/") + "/" + ($encoded -join "/")
+}
+
 function Test-IsExcludedManifestPath {
     param([string]$RelativePath)
     $normalized = $RelativePath -replace "\\", "/"
@@ -181,6 +197,45 @@ function Test-IsExcludedManifestPath {
         }
     }
     return $normalized -in @("config.json", ".qkk-version", ".qkk-update-manifest.json")
+}
+
+function Read-UpdateManifest {
+    param([string]$TargetDir)
+    $manifestPath = Join-Path $TargetDir ".qkk-update-manifest.json"
+    $files = @{}
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        return $files
+    }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($manifest.files) {
+            $manifest.files.PSObject.Properties | ForEach-Object {
+                $files[$_.Name] = [string]$_.Value
+            }
+        }
+    }
+    catch {
+        return @{}
+    }
+    return $files
+}
+
+function Write-UpdateManifest {
+    param(
+        [string]$TargetDir,
+        [string]$Revision,
+        [hashtable]$Files
+    )
+    $orderedFiles = [ordered]@{}
+    foreach ($key in ($Files.Keys | Sort-Object)) {
+        $orderedFiles[$key] = $Files[$key]
+    }
+    $manifest = [ordered]@{
+        branch = $Branch
+        revision = $Revision
+        files = $orderedFiles
+    }
+    Set-Utf8NoBomContent -Path (Join-Path $TargetDir ".qkk-update-manifest.json") -Value (($manifest | ConvertTo-Json -Depth 5) + "`n")
 }
 
 function Write-UpdateManifestFromRemoteTree {
@@ -221,6 +276,65 @@ function Write-UpdateManifestFromRemoteTree {
     }
 }
 
+function Sync-SourceTreeFromRemoteTree {
+    param([string]$TargetDir)
+    if (-not $TreeApiUrl) {
+        $script:TreeApiUrl = Get-DefaultTreeApiUrl
+    }
+    if (-not $RawContentBaseUrl) {
+        $script:RawContentBaseUrl = Get-DefaultRawContentBaseUrl
+    }
+
+    $tree = Invoke-RestMethod -Uri $TreeApiUrl -UseBasicParsing
+    if (-not $tree.tree) {
+        throw "Remote tree is empty."
+    }
+
+    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+    $knownFiles = Read-UpdateManifest -TargetDir $TargetDir
+    $nextFiles = @{}
+    $downloaded = 0
+    $skipped = 0
+
+    foreach ($entry in $tree.tree) {
+        if ([string]$entry.type -ne "blob") {
+            continue
+        }
+        $relativePath = ([string]$entry.path) -replace "\\", "/"
+        if (-not $relativePath -or (Test-IsExcludedManifestPath $relativePath)) {
+            continue
+        }
+        $remoteSha = [string]$entry.sha
+        $nextFiles[$relativePath] = $remoteSha
+        $localPath = Join-Path $TargetDir ($relativePath -replace "/", [System.IO.Path]::DirectorySeparatorChar)
+
+        if ($relativePath -ieq $BundledFfmpegPath -and (Test-Path -LiteralPath $localPath)) {
+            $skipped += 1
+            continue
+        }
+        if ((Test-Path -LiteralPath $localPath) -and $knownFiles.ContainsKey($relativePath) -and $knownFiles[$relativePath] -eq $remoteSha) {
+            $skipped += 1
+            continue
+        }
+
+        $parent = Split-Path -Parent $localPath
+        if ($parent) {
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        }
+        $rawUrl = ConvertTo-RawContentUrl -BaseUrl $RawContentBaseUrl -RelativePath $relativePath
+        Invoke-WebRequest -Uri $rawUrl -OutFile $localPath -UseBasicParsing
+        $downloaded += 1
+    }
+
+    $revision = Get-ShortRevision ([string]$tree.sha)
+    if (-not $revision) {
+        $revision = Get-RemoteRevisionId
+    }
+    Write-UpdateManifest -TargetDir $TargetDir -Revision $revision -Files $nextFiles
+    Write-Host "QKKDecrypt source sync downloaded $downloaded file(s), skipped $skipped file(s)"
+    return $revision
+}
+
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 $TempRoot = Join-Path $env:TEMP ("qkkdeploy-" + [guid]::NewGuid().ToString("N"))
 $ZipPath = Join-Path $TempRoot "source.zip"
@@ -228,21 +342,28 @@ $ExtractDir = Join-Path $TempRoot "source"
 
 try {
     Write-Step "Installing to $InstallDir"
-    New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
 
-    Write-Step "Downloading source package"
-    Invoke-WebRequest -Uri $RepoZipUrl -OutFile $ZipPath -UseBasicParsing
+    if ($RepoZipUrl) {
+        New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
 
-    Write-Step "Extracting source package"
-    Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
-    $SourceRoot = Get-ChildItem -Path $ExtractDir -Directory | Select-Object -First 1
-    if ($null -eq $SourceRoot) {
-        throw "Downloaded package did not contain a source directory."
+        Write-Step "Downloading source package"
+        Invoke-WebRequest -Uri $RepoZipUrl -OutFile $ZipPath -UseBasicParsing
+
+        Write-Step "Extracting source package"
+        Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
+        $SourceRoot = Get-ChildItem -Path $ExtractDir -Directory | Select-Object -First 1
+        if ($null -eq $SourceRoot) {
+            throw "Downloaded package did not contain a source directory."
+        }
+
+        Write-Step "Syncing source files"
+        Copy-SourceTree -SourceDir $SourceRoot.FullName -TargetDir $InstallDir
+        $Revision = Write-UpdateManifestFromRemoteTree -TargetDir $InstallDir
     }
-
-    Write-Step "Syncing source files"
-    Copy-SourceTree -SourceDir $SourceRoot.FullName -TargetDir $InstallDir
-    $Revision = Write-UpdateManifestFromRemoteTree -TargetDir $InstallDir
+    else {
+        Write-Step "Syncing source files"
+        $Revision = Sync-SourceTreeFromRemoteTree -TargetDir $InstallDir
+    }
     if (-not $Revision) {
         $Revision = Get-RemoteRevisionId
     }

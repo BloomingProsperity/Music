@@ -209,6 +209,7 @@ def _run_sample_verify_cli(paths: RuntimePaths, config: dict[str, Any], args: ar
         recursive=not bool(args.no_recursive),
         max_workers=int(args.max_workers or 2),
         bitrate_kbps=int(args.bitrate or 320),
+        fresh=bool(args.fresh),
     )
     for item in summary.results:
         label = PLATFORM_LABELS.get(item.platform_id, item.platform_id)
@@ -526,6 +527,7 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
     verify_parser.add_argument("--no-recursive", action="store_true", help="禁用递归扫描")
     verify_parser.add_argument("--max-workers", type=int, help="平台解密后转码并发数，正整数")
     verify_parser.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3 验证输出码率 kbps")
+    verify_parser.add_argument("--fresh", action="store_true", help="清空对应平台验证输出后重新解密转码")
     return parser
 
 

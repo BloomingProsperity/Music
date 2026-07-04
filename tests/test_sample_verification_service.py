@@ -152,6 +152,43 @@ def test_sample_verification_strict_decodes_reused_outputs(tmp_path: pathlib.Pat
     assert summary.results[0].verified_outputs == [output]
 
 
+def test_sample_verification_fresh_mode_removes_platform_output_before_batch(tmp_path: pathlib.Path, monkeypatch) -> None:
+    source = tmp_path / "song.ncm"
+    source.write_bytes(b"encrypted")
+    stale = tmp_path / "out" / "netease" / "old.mp3"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"old")
+    output = tmp_path / "out" / "netease" / "song.mp3"
+
+    def fake_build_platform_adapter(platform_id: str) -> _FakeAdapter:
+        return _FakeAdapter(platform_id, [source])
+
+    def fake_run_batch(batch_config: BatchRunConfig, _adapter: _FakeAdapter) -> int:
+        assert not stale.exists()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"new")
+        assert batch_config.event_sink is not None
+        batch_config.event_sink("file_finished", {"result": "success", "output_path": str(output)})
+        return 0
+
+    monkeypatch.setattr("src.Application.sample_verification_service.build_platform_adapter", fake_build_platform_adapter)
+    monkeypatch.setattr("src.Application.sample_verification_service.run_batch", fake_run_batch)
+    monkeypatch.setattr("src.Application.sample_verification_service.resolve_ffmpeg_path", lambda _paths: pathlib.Path("ffmpeg.exe"))
+    monkeypatch.setattr("src.Application.sample_verification_service._strict_decode", lambda _ffmpeg, _path: SimpleNamespace(ok=True, reason=""))
+
+    summary = run_sample_verification(
+        input_paths=[tmp_path],
+        output_dir=tmp_path / "out",
+        config={"shared": {}, "netease": {}},
+        paths=_paths(tmp_path),
+        platforms=("netease",),
+        fresh=True,
+    )
+
+    assert summary.exit_code == 0
+    assert summary.results[0].verified_outputs == [output]
+
+
 def test_sample_verification_fails_when_strict_decode_rejects_output(tmp_path: pathlib.Path, monkeypatch) -> None:
     source = tmp_path / "song.kwm"
     source.write_bytes(b"encrypted")

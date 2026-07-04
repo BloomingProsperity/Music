@@ -41,6 +41,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 ```
 
 如果电脑没有 Python 3.10+，脚本会尝试通过 `winget` 安装 Python 3.12。
+重复部署或客户端更新时只同步变化文件；本地已有 `ffmpeg` 时不会重新下载。
 
 默认安装到：
 
@@ -78,7 +79,7 @@ python main.py qq decrypt --input D:\ --output C:\qkk_mp3 --format-mflac mp3 --b
 要确认真实样本是否能最终输出可播放的 mp3，可以用 `sample-verify`。它会扫描指定目录，按平台解密为 mp3，再用 ffmpeg 严格解码输出文件；没有样本时会明确报告未验证。
 
 ```powershell
-python main.py sample-verify --input D:\music --output C:\qkk_sample_verify --platform all --bitrate 320 --max-workers 2
+python main.py sample-verify --input D:\music --output C:\qkk_sample_verify --platform all --bitrate 320 --max-workers 2 --fresh
 ```
 
 也可以只验证某几个平台：
@@ -88,6 +89,7 @@ python main.py sample-verify --input C:\music --input D:\music --output C:\qkk_s
 ```
 
 每次验证都会在输出目录生成 `sample_verify_report.json` 和 `sample_verify_report.txt`，用于回看候选数量、严格解码通过数量、失败原因和已验证输出文件路径。
+加 `--fresh` 会先清空对应平台的验证输出子目录，再重新解密、转码和严格解码。
 
 ## 使用边界
 

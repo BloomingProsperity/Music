@@ -227,6 +227,7 @@ class CliParserTests(unittest.TestCase):
                     "--max-workers",
                     "2",
                     "--no-recursive",
+                    "--fresh",
                 ]
             )
 
@@ -237,6 +238,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.bitrate, 320)
         self.assertEqual(args.max_workers, 2)
         self.assertTrue(args.no_recursive)
+        self.assertTrue(args.fresh)
 
     def test_sample_verify_cli_returns_service_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -264,6 +266,7 @@ class CliParserTests(unittest.TestCase):
                         str(root / "out"),
                         "--platform",
                         "netease",
+                        "--fresh",
                     ]
                 )
 
@@ -272,6 +275,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(verify.call_args.kwargs["input_paths"], [pathlib.Path(root)])
         self.assertEqual(verify.call_args.kwargs["output_dir"], pathlib.Path(root / "out"))
         self.assertEqual(verify.call_args.kwargs["platforms"], ("netease",))
+        self.assertTrue(verify.call_args.kwargs["fresh"])
         write_reports.assert_called_once_with(summary, pathlib.Path(root / "out"))
 
     def test_sample_verify_cli_reports_partial_missing_samples_distinctly(self) -> None:
