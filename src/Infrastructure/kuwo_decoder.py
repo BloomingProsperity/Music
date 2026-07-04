@@ -12,6 +12,7 @@ HEADER_SIZE = 1024
 KEY_SIZE = 32
 MAX_FIND_KEY_TIME = 468
 STREAM_CHUNK_SIZE = 1024 * 1024
+SUPPORTED_SUFFIXES = (".kwm.flac", ".kwma", ".kwm")
 YEELION_MAGIC = b"yeelion-kuwo-tme"
 YEELION_KEY_OFFSET = 0x18
 YEELION_KEY_SIZE = 8
@@ -24,7 +25,11 @@ class KwmDecodeError(RuntimeError):
 
 def _output_basename(input_path: pathlib.Path) -> str:
     name = input_path.name
-    return name[:-4] if name.lower().endswith(".kwm") else input_path.stem
+    lower_name = name.lower()
+    for suffix in SUPPORTED_SUFFIXES:
+        if lower_name.endswith(suffix):
+            return name[: -len(suffix)]
+    return input_path.stem
 
 
 def _swap_key_halves(key: bytes) -> bytes:

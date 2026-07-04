@@ -101,8 +101,8 @@ def platform_specs() -> list[PlatformSpec]:
         PlatformSpec(
             platform_id="kuwo",
             title="酷我音乐",
-            subtitle=".kwm / .kwma",
-            source_extensions=(".kwm", ".kwma"),
+            subtitle=".kwm / .kwma / .kwm.flac",
+            source_extensions=(".kwm", ".kwma", ".kwm.flac"),
             format_controls=(
                 FormatControlSpec("target_format_kwm", "kwm 输出格式", ("auto", *TARGET_FORMATS), "auto"),
             ),

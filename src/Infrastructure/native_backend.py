@@ -17,7 +17,7 @@ class NativeKudogBackend:
         self.available = False
         self.reason = "dll_not_found"
         self._dll = None
-        self._buffer_cache: dict[tuple[str, int], ctypes.Array] = {}
+        self._buffer_cache: dict[tuple[str, int], tuple[bytes, ctypes.Array]] = {}
         if dll_path is None or not dll_path.exists():
             return
         try:
@@ -62,10 +62,12 @@ class NativeKudogBackend:
         cache_key = (label, id(value))
         cached = self._buffer_cache.get(cache_key)
         if cached is not None:
-            return cached
+            cached_value, cached_buffer = cached
+            if cached_value == value:
+                return cached_buffer
         array_type = ctypes.c_uint8 * len(value)
         buffer = array_type.from_buffer_copy(value)
-        self._buffer_cache[cache_key] = buffer
+        self._buffer_cache[cache_key] = (value, buffer)
         return buffer
 
     @staticmethod

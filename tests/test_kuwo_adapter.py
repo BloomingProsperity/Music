@@ -32,19 +32,23 @@ def test_kuwo_adapter_collects_kwm_files_and_maps_target_formats(tmp_path: pathl
     source = tmp_path / "song.kwm"
     nested = tmp_path / "nested" / "other.kwm"
     alternate = tmp_path / "nested" / "alternate.kwma"
+    declared_flac = tmp_path / "nested" / "declared.kwm.flac"
     ignored = tmp_path / "ignored.ncm"
     nested.parent.mkdir()
     source.write_bytes(b"kwm")
     nested.write_bytes(b"kwm")
     alternate.write_bytes(b"kwma")
+    declared_flac.write_bytes(b"kwm-flac")
     ignored.write_bytes(b"ncm")
 
     assert adapter.collect_files(source, recursive=False) == [source]
     assert adapter.collect_files(alternate, recursive=False) == [alternate]
+    assert adapter.collect_files(declared_flac, recursive=False) == [declared_flac]
     assert adapter.collect_files(tmp_path, recursive=False) == [source]
-    assert adapter.collect_files(tmp_path, recursive=True) == [alternate, nested, source]
+    assert adapter.collect_files(tmp_path, recursive=True) == [alternate, declared_flac, nested, source]
     assert adapter.output_basename(source) == "song"
     assert adapter.output_basename(alternate) == "alternate"
+    assert adapter.output_basename(declared_flac) == "declared"
     assert adapter.predicted_extension(source, {"target_format_kwm": "auto"}) is None
     assert adapter.predicted_extension(source, {"target_format_kwm": "mp3"}) == "mp3"
     assert adapter.desired_target_format(source, {"target_format_kwm": "auto"}) == "auto"

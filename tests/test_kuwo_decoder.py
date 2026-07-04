@@ -79,6 +79,21 @@ def test_decode_kwm_file_strips_kwma_suffix(tmp_path: pathlib.Path) -> None:
     assert pathlib.Path(summary["output_path"]).name == "song.wav"
 
 
+def test_decode_kwm_file_strips_kwm_flac_suffix(tmp_path: pathlib.Path) -> None:
+    key = bytes(range(1, 33))
+    payload = _wav_like_payload(32 * 468)
+    last_chunk_start = 32 * 467
+    swapped_key = _swap_halves(key)
+    payload[last_chunk_start:last_chunk_start + 32] = bytes(a ^ b for a, b in zip(swapped_key, key))
+    encrypted = _xor_with_key(bytes(payload), key)
+    kwm_path = tmp_path / "song.kwm.flac"
+    kwm_path.write_bytes(b"\0" * 1024 + encrypted)
+
+    summary = decode_kwm_file(kwm_path, tmp_path / "out")
+
+    assert pathlib.Path(summary["output_path"]).name == "song.wav"
+
+
 def test_decode_kwm_file_uses_shared_xor_helper(tmp_path: pathlib.Path, monkeypatch) -> None:
     key = bytes(range(1, 33))
     payload = _wav_like_payload(32 * 468)

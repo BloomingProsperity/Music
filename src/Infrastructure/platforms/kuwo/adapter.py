@@ -7,7 +7,21 @@ from src.Infrastructure.kuwo_decoder import decode_kwm_file, peek_kwm_payload_co
 from src.Infrastructure.transcoder import normalize_target_format
 
 
-SUPPORTED_SUFFIXES = {".kwm", ".kwma"}
+SUPPORTED_SUFFIXES = {".kwm", ".kwma", ".kwm.flac"}
+
+
+def _has_supported_suffix(input_path: pathlib.Path) -> bool:
+    suffixes = "".join(input_path.suffixes).lower()
+    return input_path.suffix.lower() in SUPPORTED_SUFFIXES or suffixes in SUPPORTED_SUFFIXES
+
+
+def _output_basename(input_path: pathlib.Path) -> str:
+    name = input_path.name
+    lower_name = name.lower()
+    for suffix in sorted(SUPPORTED_SUFFIXES, key=len, reverse=True):
+        if lower_name.endswith(suffix):
+            return name[: -len(suffix)]
+    return input_path.stem
 
 
 @dataclass(slots=True)
@@ -23,19 +37,18 @@ class KuwoPlatformAdapter:
 
     def collect_files(self, input_path: pathlib.Path, recursive: bool) -> list[pathlib.Path]:
         if input_path.is_file():
-            return [input_path] if input_path.suffix.lower() in SUPPORTED_SUFFIXES else []
+            return [input_path] if _has_supported_suffix(input_path) else []
         if not input_path.exists():
             return []
         pattern = "**/*" if recursive else "*"
         return sorted(
             candidate
             for candidate in input_path.glob(pattern)
-            if candidate.is_file() and candidate.suffix.lower() in SUPPORTED_SUFFIXES
+            if candidate.is_file() and _has_supported_suffix(candidate)
         )
 
     def output_basename(self, input_path: pathlib.Path) -> str:
-        name = input_path.name
-        return name[:-4] if name.lower().endswith(".kwm") else input_path.stem
+        return _output_basename(input_path)
 
     def predicted_extension(self, input_path: pathlib.Path, settings: dict) -> str | None:
         target = normalize_target_format(settings.get("target_format_kwm", "auto"))
