@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox
 
-from src.Presentation.ui_app import MainWindow
+from src.Presentation.ui_app import MainWindow, build_stylesheet
 
 
 def _app() -> QApplication:
@@ -178,12 +178,16 @@ def test_ui_keeps_output_open_and_artist_grouping_controls() -> None:
 
     open_button = page.output_dir.findChild(QPushButton, "OpenOutputButton")
     artist_grouping = page.findChild(QCheckBox, "GroupByArtist")
+    delete_source = page.findChild(QCheckBox, "DeleteSourceAfterSuccess")
     workers = page.findChild(QSpinBox, "TranscodeWorkers")
 
     assert open_button is not None
     assert open_button.text() == "打开"
     assert artist_grouping is not None
     assert artist_grouping.text() == "按音乐作者分类"
+    assert delete_source is not None
+    assert delete_source.text() == "完成后删除源文件"
+    assert delete_source.isChecked() is False
     assert workers is not None
     assert workers.maximum() >= 999
 
@@ -280,8 +284,49 @@ def test_sidebar_shows_default_version_and_update_button() -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
 
     assert version is not None
-    assert version.text() == "v0.01"
+    assert version.text() == "0.02"
     assert update_button is not None
+    assert update_button.text() == "更新系统"
+
+
+def test_update_button_shows_available_update_when_remote_is_newer(monkeypatch) -> None:
+    app = _app()
+    window = MainWindow()
+    update_button = window.findChild(QPushButton, "UpdateButton")
+    assert update_button is not None
+
+    class Result:
+        ok = True
+        update_available = True
+        message = "已有版本更新"
+
+    monkeypatch.setattr("src.Presentation.ui_app.check_update_availability", lambda _root_dir: Result())
+    monkeypatch.setattr("src.Presentation.ui_app.threading.Thread", _ImmediateThread)
+
+    window._start_update_check()
+    app.processEvents()
+
+    assert update_button.text() == "已有版本更新"
+
+
+def test_update_button_keeps_normal_text_when_no_update(monkeypatch) -> None:
+    app = _app()
+    window = MainWindow()
+    update_button = window.findChild(QPushButton, "UpdateButton")
+    assert update_button is not None
+    update_button.setText("已有版本更新")
+
+    class Result:
+        ok = True
+        update_available = False
+        message = "已是最新版本"
+
+    monkeypatch.setattr("src.Presentation.ui_app.check_update_availability", lambda _root_dir: Result())
+    monkeypatch.setattr("src.Presentation.ui_app.threading.Thread", _ImmediateThread)
+
+    window._start_update_check()
+    app.processEvents()
+
     assert update_button.text() == "更新系统"
 
 
@@ -291,25 +336,45 @@ def test_update_button_runs_update_service_and_logs_result(monkeypatch) -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
     assert update_button is not None
     calls: list[pathlib.Path] = []
+    restart_calls: list[pathlib.Path] = []
 
     class Result:
         ok = True
         message = "已更新到最新版本"
 
+    class RestartResult:
+        ok = True
+        message = "正在重启"
+
     def fake_run_update(root_dir: pathlib.Path) -> Result:
         calls.append(root_dir)
         return Result()
 
+    def fake_restart_application(root_dir: pathlib.Path) -> RestartResult:
+        restart_calls.append(root_dir)
+        return RestartResult()
+
     monkeypatch.setattr("src.Presentation.ui_app.run_update", fake_run_update)
+    monkeypatch.setattr("src.Presentation.ui_app.restart_application", fake_restart_application)
     monkeypatch.setattr("src.Presentation.ui_app.threading.Thread", _ImmediateThread)
 
     update_button.click()
     app.processEvents()
 
     assert calls == [window.paths.root_dir]
+    assert restart_calls == [window.paths.root_dir]
     status_message = window.findChild(QLabel, "StatusMessage")
     assert status_message is not None
-    assert "已更新到最新版本" in status_message.text()
+    assert "正在重启" in status_message.text()
+
+
+def test_form_controls_have_visible_control_frames() -> None:
+    stylesheet = build_stylesheet()
+
+    assert "QComboBox#Combo" in stylesheet
+    assert "background: #FFFDF9" in stylesheet
+    assert "QCheckBox::indicator" in stylesheet
+    assert "border: 1px solid #B8C7BC" in stylesheet
 
 
 def test_run_panel_removes_black_log_box() -> None:

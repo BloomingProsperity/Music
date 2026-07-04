@@ -60,6 +60,7 @@ def test_build_qq_batch_config_preserves_paths_formats_and_transcode_options() -
         transcode_max_workers=3,
         embed_cover_art=False,
         supplement_album_metadata=False,
+        delete_source_after_success=True,
         sample_rate_hz=48000,
         bitrate_kbps=320,
         qq_fetch_missing_ekey=False,
@@ -81,6 +82,7 @@ def test_build_qq_batch_config_preserves_paths_formats_and_transcode_options() -
     assert batch_config.settings["transcode_bitrate_kbps"] == 320
     assert batch_config.settings["embed_cover_art"] is False
     assert batch_config.settings["supplement_album_metadata"] is False
+    assert batch_config.settings["delete_source_after_success"] is True
     assert batch_config.settings["qq_fetch_missing_ekey"] is False
     assert batch_config.settings["qq_cache_ekeys"] is True
 
@@ -107,6 +109,7 @@ def test_build_platform_batch_config_preserves_netease_settings_and_callbacks() 
         transcode_max_workers=4,
         embed_cover_art=True,
         supplement_album_metadata=True,
+        delete_source_after_success=True,
         sample_rate_hz=44100,
         bitrate_kbps=256,
         platform_settings={"target_format_ncm": "mp3"},
@@ -125,6 +128,7 @@ def test_build_platform_batch_config_preserves_netease_settings_and_callbacks() 
     assert batch_config.settings["transcode_max_workers"] == 4
     assert batch_config.settings["embed_cover_art"] is True
     assert batch_config.settings["supplement_album_metadata"] is True
+    assert batch_config.settings["delete_source_after_success"] is True
     assert batch_config.settings["transcode_sample_rate_hz"] == 44100
     assert batch_config.settings["transcode_bitrate_kbps"] == 256
     assert batch_config.event_sink is options.event_sink

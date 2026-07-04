@@ -129,6 +129,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "embed_cover_art": True,
             "supplement_album_metadata": False,
             "group_by_artist": False,
+            "delete_source_after_success": False,
             "always_run_as_admin": False,
         },
         "qq": {
@@ -232,6 +233,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
         shared_always_run_as_admin = bool(shared_always_run_as_admin)
     config["shared"]["always_run_as_admin"] = shared_always_run_as_admin
     config["shared"]["group_by_artist"] = _normalize_config_bool(config["shared"].get("group_by_artist"), False)
+    config["shared"]["delete_source_after_success"] = _normalize_config_bool(config["shared"].get("delete_source_after_success"), False)
 
     format_rules = config["qq"].get("format_rules")
     if not isinstance(format_rules, dict):

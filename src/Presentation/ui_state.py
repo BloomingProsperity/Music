@@ -42,6 +42,7 @@ class PlatformRunOptions:
     embed_cover_art: bool = False
     supplement_album_metadata: bool = False
     group_by_artist: bool = False
+    delete_source_after_success: bool = False
     sample_rate_hz: int | None = None
     bitrate_kbps: int | None = 320
     qq_fetch_missing_ekey: bool = True
@@ -177,6 +178,7 @@ def build_qq_batch_config(options: PlatformRunOptions) -> BatchRunConfig:
         "embed_cover_art": bool(options.embed_cover_art),
         "supplement_album_metadata": bool(options.supplement_album_metadata),
         "group_by_artist": bool(options.group_by_artist),
+        "delete_source_after_success": bool(options.delete_source_after_success),
         "transcode_sample_rate_hz": options.sample_rate_hz,
         "transcode_bitrate_kbps": options.bitrate_kbps,
         "auto_transcode_after_decode": True,
@@ -204,6 +206,7 @@ def _common_batch_settings(options: PlatformRunOptions) -> dict[str, Any]:
         "embed_cover_art": bool(options.embed_cover_art),
         "supplement_album_metadata": bool(options.supplement_album_metadata),
         "group_by_artist": bool(options.group_by_artist),
+        "delete_source_after_success": bool(options.delete_source_after_success),
         "transcode_sample_rate_hz": options.sample_rate_hz,
         "transcode_bitrate_kbps": options.bitrate_kbps,
         "auto_transcode_after_decode": True,

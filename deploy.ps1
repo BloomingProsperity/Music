@@ -120,6 +120,20 @@ function New-DesktopShortcut {
     $shortcut.Save()
 }
 
+function Get-RemoteRevisionId {
+    param([string]$Branch = "codex/platforms-ncm-kuwo-upgrade")
+    try {
+        $encodedBranch = [uri]::EscapeDataString($Branch)
+        $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/BloomingProsperity/Music/commits/$encodedBranch" -UseBasicParsing
+        if ($commit.sha) {
+            return $commit.sha.Substring(0, [Math]::Min(7, $commit.sha.Length))
+        }
+    }
+    catch {
+    }
+    return (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+}
+
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 $TempRoot = Join-Path $env:TEMP ("qkkdeploy-" + [guid]::NewGuid().ToString("N"))
 $ZipPath = Join-Path $TempRoot "source.zip"
@@ -141,6 +155,7 @@ try {
 
     Write-Step "Syncing source files"
     Copy-SourceTree -SourceDir $SourceRoot.FullName -TargetDir $InstallDir
+    Set-Content -LiteralPath (Join-Path $InstallDir ".qkk-version") -Value (Get-RemoteRevisionId) -Encoding UTF8
 
     $Python = Ensure-Python
     $VenvDir = Join-Path $InstallDir ".venv"

@@ -7,25 +7,9 @@
 
 </div>
 
-## 项目定位
+## 简介
 
-`QKKDecrypt` 是一个面向本地文件处理场景的桌面/控制台工具集：
-- 控制台版本：批处理、自动化、脚本化操作
-- UI 版本：面向普通用户的桌面工作台
-- 架构保持三层：`Presentation / Application / Infrastructure`
-
-当前仓库源码统一按 **GPLv3** 发布；UI 路线采用 **PySide6 + QFluentWidgets** 的非商业 GPLv3 路线持续重构。
-
-## 分支说明
-
-- `main`
-  - 控制台版本
-  - 薄入口 `main.py`
-  - 打包形态：`onefile`
-- `main-ui`
-  - PySide6 桌面 UI 版本
-  - 保留无边框、Win10/11 风格、亚克力效果与动态进度反馈
-  - 打包形态：`onedir + _internal + setup`
+`QKKDecrypt` 是一款本地音乐文件处理工具，提供桌面 UI 和控制台两种使用方式。默认输出 `mp3`，也支持 `flac`、`m4a`、`wav`。
 
 ## 当前支持的平台
 
@@ -44,19 +28,18 @@
   - 文件级离线解密，默认使用本地流式解码，减少大文件内存占用
   - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
 - `酷我音乐`
-  - 实验支持 `.kwm`
-  - 当前已接入命令行与底层 adapter，UI 仍保持暂不可用，等待真实样本验证后再开放
+  - 控制台支持 `.kwm`
   - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
 
 ## 一键部署到另一台 Windows 电脑
 
-在另一台电脑打开 PowerShell，执行下面一条命令即可下载当前升级分支、创建虚拟环境、安装依赖、创建桌面快捷方式并启动 UI：
+在另一台电脑打开 PowerShell，执行下面一条命令即可安装并启动 UI：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BloomingProsperity/Music/codex/platforms-ncm-kuwo-upgrade/deploy.ps1 | iex"
 ```
 
-如果电脑没有 Python 3.10+，脚本会优先尝试通过 Windows 自带的 `winget` 自动安装 Python 3.12。
+如果电脑没有 Python 3.10+，脚本会尝试通过 `winget` 安装 Python 3.12。
 
 默认安装到：
 
@@ -64,7 +47,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 %USERPROFILE%\QKKDecrypt
 ```
 
-以后可双击桌面上的 `QKKDecrypt UI`，也可以手动运行：
+以后可双击桌面上的 `QKKDecrypt UI`，或手动运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\QKKDecrypt\run-ui.ps1"
@@ -72,7 +55,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\QKKDecrypt
 
 ## 批量转码
 
-控制台支持独立批量转码，不需要重新打包即可直接运行：
+控制台支持独立批量转码，可直接运行：
 
 ```powershell
 python main.py transcode-batch --input D:\music --output D:\mp3 --rule 全部:mp3::320 --max-workers 2
@@ -86,7 +69,9 @@ python main.py qq decrypt --input D:\ --output C:\qkk_mp3 --format-mflac mp3 --b
 
 `--transcode-workers` 和 `--max-workers` 接受正整数，不再限制为 4。机械盘/U 盘建议 `1` 或 `2`，CPU 和 SSD 都有余量时再提高。
 
-UI 里的输出目录支持一键打开，也可以勾选“按音乐作者分类”，让同一作者的输出文件自动进入对应子目录。批量解密时，已解密且需要转码的文件超过 10 个后会启动同步转码队列，界面会分别显示解密和转码进度、成功数、失败数和成功率。
+UI 里的输出目录支持一键打开。勾选“按音乐作者分类”后，同一作者的输出文件会进入对应子目录。勾选“完成后删除源文件”后，只有确认成品输出成功才会删除源加密文件。批量解密时，已解密且需要转码的文件超过 10 个后会启动同步转码队列，界面会分别显示解密和转码进度、成功数、失败数和成功率。
+
+UI 侧栏版本号保持简洁显示，例如 `0.02`。如果有新版本，更新按钮会显示“已有版本更新”；点击后会自动更新并重启客户端。
 
 支持输入格式：`flac` / `m4a` / `mp3` / `wav` / `ogg` / `aac` / `ape`。
 支持输出格式：`mp3` / `flac` / `m4a` / `wav`。
@@ -109,45 +94,18 @@ python main.py sample-verify --input C:\music --input D:\music --output C:\qkk_s
 
 每次验证都会在输出目录生成 `sample_verify_report.json` 和 `sample_verify_report.txt`，用于回看候选数量、严格解码通过数量、失败原因和已验证输出文件路径。
 
-## UI 路线
-
-UI 版本继续使用 **PySide6**，并逐步引入 **QFluentWidgets** 做导航、卡片和桌面风格控件，目标体验参考 Steam++：
-- 左侧导航栏
-- 页面分区明确
-- 设置页面独立
-- 小窗口/辅助页独立
-- 无边框桌面体验
-- 动态进度反馈与现代化状态提示
-
-## 打包
-
-```powershell
-npm run package
-```
-
-默认会构建：
-- `QKKDecrypt.exe`
-- `QKKDecrypt-UI-setup.exe`
-
-## 合规与风险边界
-
-以下内容是工程合规说明，不构成法律意见。
+## 使用边界
 
 ### 你应当只在这些前提下使用本项目
 - 仅处理你本人拥有**合法访问权限**的本地文件
 - 自行确认你的使用行为符合所在地法律、版权规则、平台协议和组织政策
 - 不要把本项目用于批量分发、倒卖、牟利或规避付费授权
 
-### 项目不承诺这些事情
+### 项目不承诺
 - 不承诺适用于所有地区、所有平台规则、所有用途
 - 不承诺一定符合你所在地区的合规要求
 - 不承诺任何特定商业用途可直接使用
 - 不为用户的侵权、违约或违规使用承担责任
-
-### 对外发布建议口径
-如果你二次分发、改包或转载，请至少保留下列表达：
-
-> 本项目按 GPLv3 发布，仅面向学习、研究与本地文件处理场景。使用者应仅处理自己拥有合法访问权限的文件，并自行确认其行为符合适用法律、版权规则及平台协议。项目作者不对非法或违规用途负责。
 
 ## 第三方组件说明
 
@@ -158,14 +116,14 @@ npm run package
 - `PySide6`
 - `PySide6-Fluent-Widgets`
 - `FFmpeg`
-- 其他运行期依赖和打包依赖
+- 其他运行依赖
 
 ## 致谢
 
 - QQ 音乐解密模型思路参考项目：
   - [`qqmusic_decrypt`](https://github.com/luyikk/qqmusic_decrypt)
 - 网易云音乐解密模型参考 `ncmdump` 相关实现思路
-- 其他平台相关逻辑以学习、研究和兼容性验证为目的持续整理
+- 其他平台逻辑参考公开资料和本地样本验证
 
 ## 许可证
 

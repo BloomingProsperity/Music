@@ -103,6 +103,13 @@ def _transcode_enabled(settings: dict[str, Any]) -> bool:
     return bool(value)
 
 
+def _delete_source_enabled(settings: dict[str, Any]) -> bool:
+    value = settings.get("delete_source_after_success", False)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def _transcode_audio_profile(settings: dict[str, Any]) -> tuple[int | None, int | None]:
     return (
         normalize_sample_rate(settings.get("transcode_sample_rate_hz")),
@@ -338,6 +345,35 @@ def _artist_name_parts(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _metadata_tag_text(value: Any) -> str:
+    pieces: list[str] = []
+    for part in _artist_name_parts(value):
+        text = " ".join(str(part or "").split())
+        if text and text not in pieces:
+            pieces.append(text)
+    return "、".join(pieces)
+
+
+def _first_metadata_value(metadata: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = metadata.get(key)
+        text = _metadata_tag_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _metadata_tags_from_detail(detail: dict[str, Any]) -> dict[str, str]:
+    metadata = detail.get("metadata") if isinstance(detail, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    tags = {
+        "title": _first_metadata_value(metadata, "title", "TITLE", "musicName", "music_name", "songName", "name"),
+        "artist": _first_metadata_value(metadata, "artist", "ARTIST", "album_artist", "ALBUMARTIST", "aART", "\xa9ART"),
+        "album": _first_metadata_value(metadata, "album", "ALBUM", "albumName", "album_name", "\xa9alb"),
+    }
+    return {key: value for key, value in tags.items() if value}
+
+
 def _artist_from_summary_or_filename(summary: dict[str, Any], input_path: pathlib.Path) -> str:
     metadata = summary.get("metadata") if isinstance(summary, dict) else {}
     metadata = metadata if isinstance(metadata, dict) else {}
@@ -409,7 +445,65 @@ def _publish_file(source_path: pathlib.Path, target_path: pathlib.Path) -> pathl
     return target_path
 
 
-def _maybe_transcode(logger: logging.Logger, input_path: pathlib.Path, target_format: str, current_path: pathlib.Path, detected_container: str, file_timing: dict[str, float], *, sample_rate_hz: int | None = None, bitrate_kbps: int | None = None) -> tuple[pathlib.Path, str, dict[str, Any] | None]:
+def _same_file_identity(left: pathlib.Path, right: pathlib.Path) -> bool:
+    try:
+        return left.resolve(strict=False) == right.resolve(strict=False)
+    except OSError:
+        return pathlib.Path(str(left)).absolute() == pathlib.Path(str(right)).absolute()
+
+
+def _delete_source_after_success(
+    logger: logging.Logger,
+    config: BatchRunConfig,
+    source_path: pathlib.Path,
+    output_path: pathlib.Path,
+) -> dict[str, Any]:
+    cleanup: dict[str, Any] = {
+        "enabled": _delete_source_enabled(config.settings),
+        "deleted": False,
+    }
+    if not cleanup["enabled"]:
+        cleanup["reason"] = "disabled"
+        return cleanup
+    if _same_file_identity(source_path, output_path):
+        cleanup["reason"] = "source_is_output"
+        logger.warning("source_delete_skipped: %s reason=source_is_output", source_path)
+        return cleanup
+    if not output_path.exists():
+        cleanup["reason"] = "output_missing"
+        logger.warning("source_delete_skipped: %s reason=output_missing output=%s", source_path, output_path)
+        return cleanup
+    if not source_path.exists():
+        cleanup["reason"] = "source_missing"
+        logger.info("source_delete_skipped: %s reason=source_missing", source_path)
+        return cleanup
+    if not source_path.is_file():
+        cleanup["reason"] = "source_not_file"
+        logger.warning("source_delete_skipped: %s reason=source_not_file", source_path)
+        return cleanup
+    try:
+        source_path.unlink()
+    except OSError as exc:
+        cleanup["reason"] = str(exc)
+        logger.warning("source_delete_failed: %s reason=%s", source_path, exc)
+        return cleanup
+    cleanup["deleted"] = True
+    logger.info("source_deleted_after_success: %s", source_path)
+    return cleanup
+
+
+def _maybe_transcode(
+    logger: logging.Logger,
+    input_path: pathlib.Path,
+    target_format: str,
+    current_path: pathlib.Path,
+    detected_container: str,
+    file_timing: dict[str, float],
+    *,
+    sample_rate_hz: int | None = None,
+    bitrate_kbps: int | None = None,
+    metadata_tags: dict[str, str] | None = None,
+) -> tuple[pathlib.Path, str, dict[str, Any] | None]:
     target_format = normalize_target_format(target_format)
     if target_format == "auto" or detected_container == "bin" or (target_format == detected_container and target_format != "flac"):
         return current_path, detected_container, None
@@ -426,7 +520,14 @@ def _maybe_transcode(logger: logging.Logger, input_path: pathlib.Path, target_fo
     if profile_parts:
         profile_text = " [" + " / ".join(profile_parts) + "]"
     logger.info("transcoding: %s -> %s%s", current_path.name, target_path.suffix, profile_text)
-    meta = transcode_file(current_path, target_path, target_format, sample_rate_hz=sample_rate_hz, bitrate_kbps=bitrate_kbps)
+    meta = transcode_file(
+        current_path,
+        target_path,
+        target_format,
+        sample_rate_hz=sample_rate_hz,
+        bitrate_kbps=bitrate_kbps,
+        metadata=metadata_tags,
+    )
     logger.info("transcoding_ffmpeg: %s", meta.get("ffmpeg_path", ""))
     if current_path.exists():
         current_path.unlink()
@@ -452,6 +553,7 @@ def _transcode_one_prepared_artifact(
             prepared.file_timing,
             sample_rate_hz=sample_rate_hz,
             bitrate_kbps=bitrate_kbps,
+            metadata_tags=_metadata_tags_from_detail(prepared.detail),
         )
         prepared.working_path = working_path
         prepared.detected_container = final_extension
@@ -706,6 +808,7 @@ def _finalize_prepared_artifact(
                 prepared.file_timing,
                 sample_rate_hz=transcode_sample_rate_hz,
                 bitrate_kbps=transcode_bitrate_kbps,
+                metadata_tags=_metadata_tags_from_detail(prepared.detail),
             )
             _emit_event(
                 config,
@@ -825,6 +928,9 @@ def _finalize_prepared_artifact(
         )
         if transcode_meta is not None:
             payload["transcode"] = transcode_meta
+        source_cleanup = _delete_source_after_success(logger, config, prepared.input_path, published)
+        if source_cleanup["enabled"]:
+            payload["source_cleanup"] = source_cleanup
         logger.info("success: %s -> %s", prepared.input_path.name, published)
         logger.info(
             "[timing] file_done [%d/%d] %s reason=success %s",

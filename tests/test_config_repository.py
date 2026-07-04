@@ -37,6 +37,7 @@ class ConfigRepositoryTests(unittest.TestCase):
             self.assertEqual(config["shared"]["transcode_max_workers"], 2)
             self.assertTrue(config["qq"]["qq_fetch_missing_ekey"])
             self.assertTrue(config["qq"]["qq_cache_ekeys"])
+            self.assertFalse(config["shared"]["delete_source_after_success"])
             self.assertIn("kuwo", config)
             self.assertEqual(config["kuwo"]["input_dir"], "")
             self.assertEqual(config["kuwo"]["output_dir"], str(pathlib.Path(temp_dir) / "output" / "kuwo"))
@@ -66,6 +67,26 @@ class ConfigRepositoryTests(unittest.TestCase):
 
             self.assertEqual(config["shared"]["transcode_max_workers"], 12)
             self.assertEqual(config["transcode_batch"]["max_workers"], 9)
+
+    def test_config_normalizes_delete_source_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            paths.plugins_config.parent.mkdir(parents=True, exist_ok=True)
+            paths.plugins_config.write_text(
+                json.dumps(
+                    {
+                        "decrypt_cli": {
+                            "shared": {"delete_source_after_success": "true"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            _, config = load_config(paths)
+
+            self.assertIs(config["shared"]["delete_source_after_success"], True)
 
 
 if __name__ == "__main__":

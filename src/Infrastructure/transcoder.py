@@ -437,6 +437,20 @@ def _audio_option_args(
     return args
 
 
+def _metadata_args(metadata: dict[str, object] | None) -> list[str]:
+    args: list[str] = []
+    if not metadata:
+        return args
+    for key in ("title", "artist", "album"):
+        value = str(metadata.get(key) or "").strip()
+        if not value:
+            continue
+        value = " ".join(value.split())
+        if value:
+            args.extend(["-metadata", f"{key}={value}"])
+    return args
+
+
 def transcode_file(
     input_path: pathlib.Path,
     output_path: pathlib.Path,
@@ -444,6 +458,7 @@ def transcode_file(
     *,
     sample_rate_hz: int | None = None,
     bitrate_kbps: int | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> dict[str, str | int | None]:
     paths = RuntimePaths.discover()
     ffmpeg_path = resolve_ffmpeg_path(paths)
@@ -466,6 +481,7 @@ def transcode_file(
             sample_rate_hz=sample_rate_hz,
             bitrate_kbps=bitrate_kbps,
         ),
+        *_metadata_args(metadata),
         str(temp_output),
     ]
     try:

@@ -42,7 +42,7 @@ from src.Infrastructure.config_repository import (
 )
 from src.Infrastructure.platforms.registry import build_platform_adapter
 from src.Infrastructure.runtime_paths import RuntimePaths
-from src.Infrastructure.update_service import APP_VERSION, run_update
+from src.Infrastructure.update_service import check_update_availability, resolve_app_version, restart_application, run_update
 from src.Presentation.ui_state import (
     PlatformRunOptions,
     PlatformSpec,
@@ -64,6 +64,8 @@ GREEN_SOFT = "#E4F6EC"
 RED = "#E9A0A7"
 RED_DARK = "#AA4754"
 RED_SOFT = "#FBE8EA"
+CONTROL_BG = "#FFFDF9"
+CONTROL_BORDER = "#B8C7BC"
 
 
 def _format_seconds(value: float) -> str:
@@ -76,6 +78,7 @@ class UiBridge(QObject):
     event_received = Signal(str, object)
     run_finished = Signal(int)
     log_message = Signal(str)
+    update_checked = Signal(object)
     update_finished = Signal(bool)
 
 
@@ -247,6 +250,9 @@ class PlatformPage(QWidget):
         self.group_by_artist = QCheckBox("按音乐作者分类")
         self.group_by_artist.setObjectName("GroupByArtist")
         self.group_by_artist.setChecked(False)
+        self.delete_source = QCheckBox("完成后删除源文件")
+        self.delete_source.setObjectName("DeleteSourceAfterSuccess")
+        self.delete_source.setChecked(False)
         self.fetch_ekey = QCheckBox("补取 ekey")
         self.fetch_ekey.setChecked(True)
         self.cache_ekey = QCheckBox("缓存 ekey")
@@ -277,17 +283,18 @@ class PlatformPage(QWidget):
 
         option_grid.addWidget(self.recursive, 0, 0)
         option_grid.addWidget(self.transcode, 0, 1)
-        option_grid.addWidget(self.cover, 0, 2)
-        option_grid.addWidget(self.album, 0, 3)
-        option_grid.addWidget(QLabel("采样率"), 1, 0)
-        option_grid.addWidget(self.sample_rate, 1, 1)
-        option_grid.addWidget(QLabel("码率"), 1, 2)
-        option_grid.addWidget(self.bitrate, 1, 3)
-        option_grid.addWidget(QLabel("并发"), 2, 0)
-        option_grid.addWidget(self.workers, 2, 1)
-        option_grid.addWidget(self.fetch_ekey, 2, 2)
-        option_grid.addWidget(self.cache_ekey, 2, 3)
-        option_grid.addWidget(self.group_by_artist, 3, 0, 1, 2)
+        option_grid.addWidget(self.cover, 1, 0)
+        option_grid.addWidget(self.album, 1, 1)
+        option_grid.addWidget(QLabel("采样率"), 2, 0)
+        option_grid.addWidget(self.sample_rate, 2, 1)
+        option_grid.addWidget(QLabel("码率"), 3, 0)
+        option_grid.addWidget(self.bitrate, 3, 1)
+        option_grid.addWidget(QLabel("并发"), 4, 0)
+        option_grid.addWidget(self.workers, 4, 1)
+        option_grid.addWidget(self.fetch_ekey, 5, 0)
+        option_grid.addWidget(self.cache_ekey, 5, 1)
+        option_grid.addWidget(self.group_by_artist, 6, 0, 1, 2)
+        option_grid.addWidget(self.delete_source, 7, 0, 1, 2)
         option_grid.setColumnStretch(1, 1)
         option_grid.setColumnStretch(3, 1)
         self.config_layout.addWidget(self.format_box, 1)
@@ -382,10 +389,12 @@ class MainWindow(QWidget):
         self.paths.ensure_runtime_dirs()
         save_default_config_if_missing(self.paths)
         self.root_config, self.config = load_config(self.paths)
+        self.app_version = resolve_app_version(self.paths.root_dir)
         self.bridge = UiBridge()
         self.stop_event = threading.Event()
         self.running = False
         self.updating = False
+        self.update_available = False
         self.started_at = 0.0
         self._run_counts = {"success": 0, "failed": 0, "skipped": 0}
         self._run_total = 0
@@ -398,6 +407,7 @@ class MainWindow(QWidget):
         self._connect()
         self._load_config()
         self._append_log("客户端已启动")
+        QTimer.singleShot(1200, self._start_update_check)
 
     def _build_ui(self) -> None:
         self.setWindowTitle("QKKDecrypt")
@@ -429,7 +439,7 @@ class MainWindow(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, spec.platform_id)
             self.platform_list.addItem(item)
         side_layout.addWidget(self.platform_list, 1)
-        self.version_label = QLabel(APP_VERSION)
+        self.version_label = QLabel(self.app_version)
         self.version_label.setObjectName("AppVersion")
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.update_button = QPushButton("更新系统")
@@ -582,6 +592,7 @@ class MainWindow(QWidget):
         self.bridge.event_received.connect(self._handle_run_event)
         self.bridge.run_finished.connect(self._handle_run_finished)
         self.bridge.log_message.connect(self._append_log)
+        self.bridge.update_checked.connect(self._handle_update_checked)
         self.bridge.update_finished.connect(self._handle_update_finished)
 
     def _load_config(self) -> None:
@@ -597,6 +608,7 @@ class MainWindow(QWidget):
         qq_page.cover.setChecked(bool(shared.get("embed_cover_art", False)))
         qq_page.album.setChecked(bool(shared.get("supplement_album_metadata", False)))
         qq_page.group_by_artist.setChecked(bool(shared.get("group_by_artist", False)))
+        qq_page.delete_source.setChecked(bool(shared.get("delete_source_after_success", False)))
         bitrate = qq.get("transcode_bitrate_kbps", 320)
         if bitrate:
             qq_page.bitrate.setCurrentText(str(bitrate))
@@ -618,8 +630,10 @@ class MainWindow(QWidget):
             page.cover.setChecked(bool(shared.get("embed_cover_art", False)))
             page.album.setChecked(bool(shared.get("supplement_album_metadata", False)))
             page.group_by_artist.setChecked(bool(shared.get("group_by_artist", False)))
+            page.delete_source.setChecked(bool(shared.get("delete_source_after_success", False)))
         kuwo_page = self.pages["kuwo"]
         kuwo_page.output_dir.set_text(str(self.paths.output_dir / "kuwo"))
+        kuwo_page.delete_source.setChecked(bool(shared.get("delete_source_after_success", False)))
 
     def _save_platform_config(self, platform_id: str, page: PlatformPage) -> None:
         self.root_config, self.config = load_config(self.paths)
@@ -630,6 +644,7 @@ class MainWindow(QWidget):
         self.config["shared"]["embed_cover_art"] = page.cover.isChecked()
         self.config["shared"]["supplement_album_metadata"] = page.album.isChecked()
         self.config["shared"]["group_by_artist"] = page.group_by_artist.isChecked()
+        self.config["shared"]["delete_source_after_success"] = page.delete_source.isChecked()
         platform_config = self.config.setdefault(platform_id, {})
         platform_config["input_dir"] = page.input_path.text()
         platform_config["output_dir"] = page.output_dir.text()
@@ -697,6 +712,7 @@ class MainWindow(QWidget):
             embed_cover_art=page.cover.isChecked(),
             supplement_album_metadata=page.album.isChecked(),
             group_by_artist=page.group_by_artist.isChecked(),
+            delete_source_after_success=page.delete_source.isChecked(),
             sample_rate_hz=page.sample_rate_value(),
             bitrate_kbps=page.bitrate_value(),
             qq_fetch_missing_ekey=page.fetch_ekey.isChecked(),
@@ -733,9 +749,29 @@ class MainWindow(QWidget):
             return
         self.updating = True
         self.update_button.setEnabled(False)
-        self._append_log(f"开始更新系统，当前版本 {APP_VERSION}")
+        self.update_button.setText("更新中")
+        self._append_log(f"开始更新系统，当前版本 {self.app_version}")
         thread = threading.Thread(target=self._run_update_job, daemon=True)
         thread.start()
+
+    def _start_update_check(self) -> None:
+        if self.running or self.updating:
+            return
+        thread = threading.Thread(target=self._run_update_check_job, daemon=True)
+        thread.start()
+
+    def _run_update_check_job(self) -> None:
+        try:
+            result = check_update_availability(self.paths.root_dir)
+        except Exception:
+            return
+        self.bridge.update_checked.emit(result)
+
+    def _refresh_update_button_text(self) -> None:
+        if self.updating:
+            self.update_button.setText("更新中")
+        else:
+            self.update_button.setText("已有版本更新" if self.update_available else "更新系统")
 
     def _run_update_job(self) -> None:
         ok = False
@@ -963,6 +999,24 @@ class MainWindow(QWidget):
     def _handle_update_finished(self, ok: bool) -> None:
         self.updating = False
         self.update_button.setEnabled(not self.running)
+        if ok:
+            self._restart_after_update()
+        else:
+            self._refresh_update_button_text()
+
+    def _handle_update_checked(self, result: object) -> None:
+        if not bool(getattr(result, "ok", False)):
+            return
+        self.update_available = bool(getattr(result, "update_available", False))
+        self._refresh_update_button_text()
+
+    def _restart_after_update(self) -> None:
+        result = restart_application(self.paths.root_dir)
+        self._append_log(result.message)
+        if result.ok:
+            app = QApplication.instance()
+            if app is not None:
+                QTimer.singleShot(250, app.quit)
 
     def _append_log(self, message: str) -> None:
         text = str(message or "").strip()
@@ -990,8 +1044,10 @@ def build_stylesheet() -> str:
     QLabel#StatusOff {{ background: {RED_SOFT}; color: {RED_DARK}; border: 1px solid {RED}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
     QLabel#Stat {{ background: {GREEN_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {GREEN_DARK}; font-weight: 600; }}
     QLabel#DecodeSuccessRate, QLabel#TranscodeSuccessRate {{ background: {RED_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {RED_DARK}; font-weight: 600; }}
-    QLineEdit#Input, QComboBox#Combo, QSpinBox#Spin, QSpinBox#TranscodeWorkers {{ background: white; border: 1px solid {BORDER}; border-radius: 7px; padding: 5px 8px; min-height: 22px; }}
-    QLineEdit#Input:focus, QComboBox#Combo:focus, QSpinBox#Spin:focus, QSpinBox#TranscodeWorkers:focus {{ border: 1px solid {GREEN}; }}
+    QLineEdit#Input, QComboBox#Combo, QSpinBox#Spin, QSpinBox#TranscodeWorkers {{ background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER}; border-radius: 7px; padding: 5px 8px; min-height: 22px; }}
+    QLineEdit#Input:hover, QComboBox#Combo:hover, QSpinBox#Spin:hover, QSpinBox#TranscodeWorkers:hover {{ border: 1px solid {GREEN}; }}
+    QLineEdit#Input:focus, QComboBox#Combo:focus, QSpinBox#Spin:focus, QSpinBox#TranscodeWorkers:focus {{ border: 1px solid {GREEN_DARK}; }}
+    QComboBox#Combo::drop-down {{ border-left: 1px solid {CONTROL_BORDER}; width: 24px; background: {GREEN_SOFT}; border-top-right-radius: 7px; border-bottom-right-radius: 7px; }}
     QPushButton {{ border: 0; border-radius: 8px; padding: 7px 14px; background: {GREEN_SOFT}; color: {GREEN_DARK}; font-weight: 600; }}
     QPushButton#PrimaryButton {{ background: {GREEN}; color: white; min-width: 112px; }}
     QPushButton#PrimaryButton:hover {{ background: {GREEN_DARK}; }}
@@ -1000,7 +1056,10 @@ def build_stylesheet() -> str:
     QPushButton#UpdateButton:hover {{ background: {RED}; color: white; }}
     QPushButton#SmallButton {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; padding: 6px 10px; }}
     QPushButton#DisabledButton, QPushButton:disabled {{ background: #EEF0F2; color: #98A2B3; }}
-    QCheckBox {{ spacing: 8px; }}
+    QCheckBox {{ spacing: 10px; padding: 3px 2px; }}
+    QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {CONTROL_BORDER}; border-radius: 4px; background: {CONTROL_BG}; }}
+    QCheckBox::indicator:hover {{ border: 1px solid {GREEN_DARK}; background: {GREEN_SOFT}; }}
+    QCheckBox::indicator:checked {{ border: 1px solid {GREEN_DARK}; background: {GREEN}; }}
     QListWidget#PlatformList {{ background: transparent; border: 0; outline: 0; }}
     QListWidget#PlatformList::item {{ padding: 12px 10px; border-radius: 8px; margin: 2px 0; }}
     QListWidget#PlatformList::item:selected {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; }}

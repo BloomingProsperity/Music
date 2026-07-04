@@ -69,6 +69,37 @@ class ProbeAudioContainerTests(unittest.TestCase):
         self.assertIn("320k", command)
         self.assertNotIn("-q:a", command)
 
+    def test_transcode_file_passes_metadata_tags_to_ffmpeg(self) -> None:
+        completed = SimpleNamespace(returncode=0, stderr="", stdout="")
+        commands: list[list[str]] = []
+
+        def capture_run(command: list[str], **_kwargs):
+            commands.append(command)
+            pathlib.Path(command[-1]).write_bytes(b"mp3")
+            return completed
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            source = root / "source.wav"
+            output = root / "output.mp3"
+            source.write_bytes(b"RIFF....WAVE")
+            with (
+                mock.patch.object(transcoder, "resolve_ffmpeg_path", return_value=pathlib.Path("ffmpeg.exe")),
+                mock.patch.object(subprocess, "run", side_effect=capture_run),
+            ):
+                transcoder.transcode_file(
+                    source,
+                    output,
+                    "mp3",
+                    metadata={"title": "Local E2E", "artist": "Tester", "album": "Platform Tests"},
+                )
+
+        command = commands[0]
+        self.assertIn("-metadata", command)
+        self.assertIn("title=Local E2E", command)
+        self.assertIn("artist=Tester", command)
+        self.assertIn("album=Platform Tests", command)
+
     def test_media_summary_uses_fast_header_when_ffprobe_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = pathlib.Path(temp_dir) / "song.mp3"

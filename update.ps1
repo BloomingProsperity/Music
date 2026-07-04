@@ -4,6 +4,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Branch = "codex/platforms-ncm-kuwo-upgrade"
+$VersionMarker = Join-Path $Root ".qkk-version"
+
+function Get-RemoteRevisionId {
+    try {
+        $encodedBranch = [uri]::EscapeDataString($Branch)
+        $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/BloomingProsperity/Music/commits/$encodedBranch" -UseBasicParsing
+        if ($commit.sha) {
+            return $commit.sha.Substring(0, [Math]::Min(7, $commit.sha.Length))
+        }
+    }
+    catch {
+    }
+    return (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+}
 
 if (Test-Path -LiteralPath (Join-Path $Root ".git")) {
     git -C $Root pull --ff-only
@@ -51,6 +66,7 @@ try {
         }
 
     Write-Host "QKKDecrypt update copied from $RepoZipUrl"
+    Set-Content -LiteralPath $VersionMarker -Value (Get-RemoteRevisionId) -Encoding UTF8
 }
 finally {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue

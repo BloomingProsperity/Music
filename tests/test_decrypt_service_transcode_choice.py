@@ -13,6 +13,8 @@ from src.Application.decrypt_service import (
     _PreparedArtifact,
     _artifact_needs_transcode,
     _artist_from_summary_or_filename,
+    _delete_source_after_success,
+    _metadata_tags_from_detail,
     _maybe_transcode,
     _resolve_publish_target,
     _resolve_batch_transcode_choice,
@@ -111,6 +113,70 @@ class TranscodeChoiceTests(unittest.TestCase):
         )
 
         self.assertEqual(artist, "Tester、Guest")
+
+    def test_metadata_tags_are_derived_from_netease_detail(self) -> None:
+        tags = _metadata_tags_from_detail(
+            {
+                "metadata": {
+                    "musicName": "Local E2E",
+                    "artist": [["Tester", 1001], ["Guest", 1002]],
+                    "album": "Platform Tests",
+                }
+            }
+        )
+
+        self.assertEqual(
+            tags,
+            {
+                "title": "Local E2E",
+                "artist": "Tester、Guest",
+                "album": "Platform Tests",
+            },
+        )
+
+    def test_delete_source_after_success_removes_source_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            source = root / "song.mflac"
+            output = root / "out" / "song.mp3"
+            source.write_bytes(b"encrypted")
+            output.parent.mkdir()
+            output.write_bytes(b"ID3")
+            config = BatchRunConfig(
+                platform_id="qq",
+                input_path=root,
+                output_dir=root / "out",
+                recursive=False,
+                collision_policy="suffix",
+                settings={"delete_source_after_success": True},
+            )
+
+            cleanup = _delete_source_after_success(logging.getLogger("test"), config, source, output)
+
+            self.assertFalse(source.exists())
+            self.assertEqual(cleanup["enabled"], True)
+            self.assertEqual(cleanup["deleted"], True)
+
+    def test_delete_source_after_success_never_deletes_the_output_file(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            source = root / "song.mp3"
+            source.write_bytes(b"ID3")
+            config = BatchRunConfig(
+                platform_id="qq",
+                input_path=source,
+                output_dir=root,
+                recursive=False,
+                collision_policy="suffix",
+                settings={"delete_source_after_success": True},
+            )
+
+            cleanup = _delete_source_after_success(logging.getLogger("test"), config, source, source)
+
+            self.assertTrue(source.exists())
+            self.assertEqual(cleanup["enabled"], True)
+            self.assertEqual(cleanup["deleted"], False)
+            self.assertEqual(cleanup["reason"], "source_is_output")
 
     def test_publish_target_can_group_by_artist(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -227,6 +293,76 @@ class TranscodeChoiceTests(unittest.TestCase):
 
         self.assertEqual(result_code, 0)
         self.assertGreaterEqual(max_active, 2)
+
+    def test_run_batch_deletes_source_file_after_success_when_enabled(self) -> None:
+        class FakeAdapter:
+            platform_id = "qq"
+            display_name = "QQ音乐"
+
+            def collect_files(self, input_path: pathlib.Path, recursive: bool) -> list[pathlib.Path]:
+                return sorted(input_path.glob("*.mflac"))
+
+            def output_basename(self, input_path: pathlib.Path) -> str:
+                return input_path.stem
+
+            def predicted_extension(self, input_path: pathlib.Path, settings: dict) -> str | None:
+                return "flac"
+
+            def desired_target_format(self, input_path: pathlib.Path, settings: dict) -> str:
+                return "flac"
+
+            def decrypt_one(self, input_path: pathlib.Path, work_dir: pathlib.Path, settings: dict, *, log_dir: pathlib.Path) -> dict:
+                output_path = work_dir / f"{input_path.stem}.flac"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"fLaC" + b"\0" * 2048)
+                return {
+                    "output_path": str(output_path),
+                    "detected_container": "flac",
+                    "final_extension": "flac",
+                    "recognition_stage": "test",
+                    "backend": "test",
+                    "decoded_bytes": output_path.stat().st_size,
+                    "timing": {"stream_decode_sec": 0.001, "total_sec": 0.001},
+                }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            input_dir = root / "in"
+            output_dir = root / "out"
+            input_dir.mkdir()
+            source = input_dir / "one.mflac"
+            source.write_bytes(b"encrypted")
+            paths = RuntimePaths(
+                root_dir=root,
+                bundle_dir=root,
+                assets_dir=root / "assets",
+                plugins_dir=root / "plugins",
+                log_dir=root / "_log",
+                output_dir=root / "output",
+                docs_dir=root / "_docs",
+                plugins_config=root / "plugins" / "plugins.json",
+                output_manifest=root / "plugins" / "output_manifest.json",
+            )
+            config = BatchRunConfig(
+                platform_id="qq",
+                input_path=input_dir,
+                output_dir=output_dir,
+                recursive=False,
+                collision_policy="suffix",
+                settings={
+                    "transcode_enabled": False,
+                    "auto_transcode_after_decode": False,
+                    "embed_cover_art": False,
+                    "delete_source_after_success": True,
+                },
+            )
+
+            with mock.patch.object(decrypt_service.RuntimePaths, "discover", return_value=paths):
+                result_code = decrypt_service.run_batch(config, FakeAdapter())
+
+            self.assertEqual(result_code, 0)
+            self.assertFalse(source.exists())
+            self.assertTrue((output_dir / "one.flac").exists())
 
     def test_run_batch_starts_transcoding_after_pipeline_threshold(self) -> None:
         class FakeAdapter:
