@@ -11,6 +11,14 @@ from src.Infrastructure import transcoder
 
 
 class ProbeAudioContainerTests(unittest.TestCase):
+    def test_fast_detect_reads_only_file_header(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = pathlib.Path(temp_dir) / "large.flac"
+            path.write_bytes(b"fLaC" + b"\0" * (8 * 1024 * 1024))
+
+            with mock.patch.object(pathlib.Path, "read_bytes", side_effect=AssertionError("full file read")):
+                self.assertEqual(transcoder.fast_detect_container(path), "flac")
+
     def test_probe_ignores_ffmpeg_container_guess_when_decode_fails(self) -> None:
         completed = SimpleNamespace(
             returncode=1,
@@ -60,6 +68,20 @@ class ProbeAudioContainerTests(unittest.TestCase):
         self.assertIn("-b:a", command)
         self.assertIn("320k", command)
         self.assertNotIn("-q:a", command)
+
+    def test_media_summary_uses_fast_header_when_ffprobe_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = pathlib.Path(temp_dir) / "song.mp3"
+            path.write_bytes(b"ID3" + b"\0" * 256)
+            with (
+                mock.patch.object(transcoder, "resolve_ffprobe_path", return_value=None),
+                mock.patch.object(subprocess, "run", side_effect=AssertionError("fast header summary should not decode")),
+            ):
+                summary = transcoder.probe_media_summary(path)
+
+        self.assertEqual(summary["probe_source"], "fast_header")
+        self.assertEqual(summary["container"], "mp3")
+        self.assertEqual(summary["audio_streams"], 1)
 
 
 if __name__ == "__main__":

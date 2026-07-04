@@ -320,6 +320,27 @@ def _require_admin(*, interactive: bool) -> int | None:
     return 2
 
 
+def _settings_bool(settings: dict[str, Any], key: str, default: bool) -> bool:
+    value = settings.get(key, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _decrypt_requires_admin(platform_id: str, settings: dict[str, Any]) -> bool:
+    if platform_id == "kuwo":
+        return True
+    if platform_id == "qq":
+        return _settings_bool(settings, "qq_legacy_frida_enabled", False)
+    return False
+
+
+def _decrypt_requires_runtime_validation(platform_id: str, adapter, settings: dict[str, Any]) -> bool:
+    if adapter.requires_running_process():
+        return True
+    return platform_id == "qq" and _settings_bool(settings, "qq_legacy_frida_enabled", False)
+
+
 def _validate_kugou_runtime(paths: RuntimePaths, config: dict, input_path: pathlib.Path, recursive: bool, interactive: bool) -> tuple[bool, str | None, dict]:
     adapter = build_platform_adapter("kugou")
     settings = dict(config["kugou"])
@@ -353,13 +374,16 @@ def _run_platform(platform_id: str, config: dict, *, input_override: str | None 
     input_path = pathlib.Path(input_override or settings.get("input_dir") or "")
     output_dir = pathlib.Path(output_override or shared.get("output_dir") or paths.output_dir)
     recursive = _shared_recursive(config) if recursive_override is None else recursive_override
+    admin_code = _require_admin(interactive=interactive) if _decrypt_requires_admin(platform_id, settings) else None
+    if admin_code is not None:
+        return admin_code
     if platform_id == "kugou":
         ok, reason, settings = _validate_kugou_runtime(paths, config, input_path, recursive, interactive)
         if not ok:
             if not interactive and reason:
                 print(reason, file=sys.stderr)
             return pause_exit(2, reason) if interactive else 2
-    elif adapter.requires_running_process():
+    elif _decrypt_requires_runtime_validation(platform_id, adapter, settings):
         if interactive:
             ok, reason = _ensure_running_for_interactive(platform_id, adapter, settings)
             if not ok:
@@ -484,6 +508,9 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
             dec.add_argument("--format-mflac", choices=[item for item in supported_transcode_formats() if item != "auto"], help="mflac 输出格式")
             dec.add_argument("--format-mgg", choices=[item for item in supported_transcode_formats() if item != "auto"], help="mgg 输出格式")
             dec.add_argument("--format-mmp4", choices=[item for item in supported_transcode_formats() if item != "auto"], help="mmp4 输出格式")
+            dec.add_argument("--qq-no-fetch-ekey", action="store_true", help="只使用内嵌/缓存 ekey，不尝试从 QQ 音乐登录态补取")
+            dec.add_argument("--qq-ekey-cache-dir", help="QQ ekey 缓存目录（建议放在用户数据目录，不要放项目内）")
+            dec.add_argument("--qq-legacy-frida", action="store_true", help="启用已弃用的 QQ 运行期 Frida 解密链")
         elif platform_id == "kuwo":
             dec.add_argument("--format-kwm", choices=supported_transcode_formats(), help="kwm 输出格式")
             dec.add_argument("--exe-path", help="酷我 exe 路径")
@@ -522,17 +549,11 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     if argv is None and len(sys.argv) == 1:
         # Keep no-arg interactive entry explicit for packaged use.
-        admin_code = _require_admin(interactive=True)
-        if admin_code is not None:
-            return admin_code
         return run_interactive()
     paths = RuntimePaths.discover()
     parser = build_parser(paths)
     args = parser.parse_args(argv)
     if args.platform is None:
-        admin_code = _require_admin(interactive=True)
-        if admin_code is not None:
-            return admin_code
         return run_interactive()
     _, config = load_config(paths)
     if args.platform == "transcode-batch":
@@ -542,9 +563,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "decrypt":
         parser.print_help()
         return 1
-    admin_code = _require_admin(interactive=False)
-    if admin_code is not None:
-        return admin_code
     platform_id = args.platform
     settings = dict(config[platform_id])
     if args.transcode_enabled is not None:
@@ -564,6 +582,12 @@ def main(argv: list[str] | None = None) -> int:
             if value:
                 rules[source_key] = validate_target_format(value)
         settings["format_rules"] = rules
+        if getattr(args, "qq_no_fetch_ekey", False):
+            settings["qq_fetch_missing_ekey"] = False
+        if getattr(args, "qq_ekey_cache_dir", None):
+            settings["qq_ekey_cache_dir"] = args.qq_ekey_cache_dir
+        if getattr(args, "qq_legacy_frida", False):
+            settings["qq_legacy_frida_enabled"] = True
     elif platform_id == "kuwo":
         if args.format_kwm:
             settings["format_kwm"] = validate_target_format(args.format_kwm)

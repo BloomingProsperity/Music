@@ -3,8 +3,10 @@ from __future__ import annotations
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 from src.Infrastructure.runtime_paths import RuntimePaths
+from src.Presentation import cli
 from src.Presentation.cli import build_parser
 
 
@@ -43,6 +45,58 @@ class CliParserTests(unittest.TestCase):
 
             self.assertEqual(args.sample_rate, 48000)
             self.assertEqual(args.bitrate, 320)
+
+    def test_qq_decrypt_parser_accepts_local_mode_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            parser = build_parser(_runtime_paths(root))
+
+            args = parser.parse_args(
+                [
+                    "qq",
+                    "decrypt",
+                    "--qq-no-fetch-ekey",
+                    "--qq-ekey-cache-dir",
+                    str(root / "cache"),
+                    "--qq-legacy-frida",
+                ]
+            )
+
+        self.assertTrue(args.qq_no_fetch_ekey)
+        self.assertEqual(args.qq_ekey_cache_dir, str(root / "cache"))
+        self.assertTrue(args.qq_legacy_frida)
+
+    def test_qq_decrypt_cli_does_not_require_admin_for_default_local_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            config = {
+                "shared": {
+                    "output_dir": str(paths.output_dir),
+                    "recursive": True,
+                    "transcode_enabled": True,
+                    "embed_cover_art": False,
+                    "supplement_album_metadata": False,
+                },
+                "qq": {
+                    "format_rules": {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"},
+                    "qq_legacy_frida_enabled": False,
+                },
+                "kuwo": {},
+                "kugou": {},
+                "netease": {},
+            }
+
+            with (
+                mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(cli, "load_config", return_value=({}, config)),
+                mock.patch.object(cli, "is_running_as_admin", return_value=False),
+                mock.patch.object(cli, "_run_platform", return_value=0) as run_platform,
+            ):
+                result = cli.main(["qq", "decrypt", "--input", str(root), "--output", str(root / "out")])
+
+        self.assertEqual(result, 0)
+        run_platform.assert_called_once()
 
 
 if __name__ == "__main__":
