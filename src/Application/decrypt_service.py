@@ -355,10 +355,12 @@ def _publish_file(source_path: pathlib.Path, target_path: pathlib.Path) -> pathl
 
 def _maybe_transcode(logger: logging.Logger, input_path: pathlib.Path, target_format: str, current_path: pathlib.Path, detected_container: str, file_timing: dict[str, float], *, sample_rate_hz: int | None = None, bitrate_kbps: int | None = None) -> tuple[pathlib.Path, str, dict[str, Any] | None]:
     target_format = normalize_target_format(target_format)
-    if target_format == "auto" or detected_container == "bin" or target_format == detected_container:
+    if target_format == "auto" or detected_container == "bin" or (target_format == detected_container and target_format != "flac"):
         return current_path, detected_container, None
     started = time.perf_counter()
     target_path = current_path.with_suffix(f".{target_format}")
+    if target_path == current_path:
+        target_path = current_path.with_name(f".{current_path.stem}.reencoded.{time.time_ns()}.{target_format}")
     profile_parts: list[str] = []
     if sample_rate_hz:
         profile_parts.append(f"{sample_rate_hz}Hz")
@@ -520,6 +522,8 @@ def _auto_transcode_after_decode(settings: dict[str, Any]) -> bool:
 
 def _artifact_needs_transcode(desired_target: str, detected_container: str) -> bool:
     target_format = normalize_target_format(desired_target)
+    if target_format == "flac" and detected_container == "flac":
+        return True
     return not (target_format == "auto" or detected_container == "bin" or target_format == detected_container)
 
 

@@ -9,12 +9,54 @@ import unittest
 from unittest import mock
 
 from src.Application import decrypt_service
-from src.Application.decrypt_service import _PreparedArtifact, _resolve_batch_transcode_choice
+from src.Application.decrypt_service import (
+    _PreparedArtifact,
+    _artifact_needs_transcode,
+    _maybe_transcode,
+    _resolve_batch_transcode_choice,
+)
 from src.Application.models import BatchRunConfig
 from src.Infrastructure.runtime_paths import RuntimePaths
 
 
 class TranscodeChoiceTests(unittest.TestCase):
+    def test_flac_target_is_reencoded_even_when_detected_as_flac(self) -> None:
+        self.assertTrue(_artifact_needs_transcode("flac", "flac"))
+        self.assertFalse(_artifact_needs_transcode("mp3", "mp3"))
+
+    def test_same_suffix_flac_reencode_uses_distinct_working_path(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            source = root / "song.flac"
+            source.write_bytes(b"fLaC")
+
+            seen: dict[str, pathlib.Path] = {}
+
+            def fake_transcode(input_path: pathlib.Path, output_path: pathlib.Path, target_format: str, **_kwargs):
+                seen["input"] = input_path
+                seen["output"] = output_path
+                self.assertNotEqual(input_path, output_path)
+                output_path.write_bytes(b"fLaC-clean")
+                return {"output_path": str(output_path), "return_code": 0}
+
+            with mock.patch.object(decrypt_service, "transcode_file", side_effect=fake_transcode):
+                working_path, final_extension, meta = _maybe_transcode(
+                    logging.getLogger("test"),
+                    pathlib.Path("song.mflac"),
+                    "flac",
+                    source,
+                    "flac",
+                    {},
+                )
+
+            self.assertEqual(final_extension, "flac")
+            self.assertIsNotNone(meta)
+            self.assertNotEqual(working_path, source)
+            self.assertFalse(source.exists())
+            self.assertEqual(working_path.read_bytes(), b"fLaC-clean")
+            self.assertEqual(seen["input"], source)
+            self.assertEqual(seen["output"], working_path)
+
     def test_auto_transcode_still_runs_for_successful_artifacts_when_other_files_failed(self) -> None:
         artifact = _PreparedArtifact(
             index=1,
