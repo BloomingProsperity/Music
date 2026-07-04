@@ -914,7 +914,7 @@ def decode_file(
     key_path: pathlib.Path = DEFAULT_KEY_PATH,
     kgg_db_path: pathlib.Path = DEFAULT_KGG_DB_PATH,
     failed_raw_dir: pathlib.Path | None = None,
-    publish_unrecognized_to_output: bool = True,
+    publish_unrecognized_to_output: bool = False,
     attempt: str = "initial",
     force_python_v3: bool = False,
     force_python_v5: bool = False,
