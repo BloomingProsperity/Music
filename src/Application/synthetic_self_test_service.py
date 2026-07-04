@@ -21,6 +21,8 @@ from src.Infrastructure.runtime_paths import RuntimePaths
 
 NCM_CORE_KEY = bytes.fromhex("687A4852416D736F356B496E62617857")
 NCM_META_KEY = bytes.fromhex("2331346C6A6B5F215C5D2630553C2728")
+KUWO_YEELION_MAGIC = b"yeelion-kuwo-tme"
+KUWO_YEELION_PREDEFINED_KEY = b"MoOtOiTvINGwd2E6n0E1i7L5t2IoOoNk"
 
 
 def _wav_payload(frame_count: int = 16000) -> bytes:
@@ -104,6 +106,24 @@ def _write_kwm_fixture(path: pathlib.Path, payload: bytes) -> None:
     prepared[key_probe_offset:key_probe_offset + 32] = bytes(value ^ mask for value, mask in zip(swapped_key, key))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"\0" * 1024 + _xor_kwm(bytes(prepared), key))
+
+
+def _kuwo_yeelion_mask(raw_key: int) -> bytes:
+    key_text = str(raw_key)
+    if len(key_text) >= 32:
+        key_text = key_text[:32]
+    else:
+        key_text = (key_text * ((32 // len(key_text)) + 1))[:32]
+    return bytes(left ^ ord(right) for left, right in zip(KUWO_YEELION_PREDEFINED_KEY, key_text))
+
+
+def _write_yeelion_kwm_fixture(path: pathlib.Path, payload: bytes) -> None:
+    raw_key = 1234567890123456789
+    header = bytearray(1024)
+    header[:len(KUWO_YEELION_MAGIC)] = KUWO_YEELION_MAGIC
+    struct.pack_into("<Q", header, 0x18, raw_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(header) + _xor_kwm(payload, _kuwo_yeelion_mask(raw_key)))
 
 
 def _tea_encrypt_block(block: bytes, key: bytes) -> bytes:
@@ -203,6 +223,7 @@ def _write_synthetic_inputs(input_root: pathlib.Path, platforms: Iterable[str]) 
         _write_ncm_fixture(input_root / "netease" / "local_e2e.ncm", payload)
     if "kuwo" in normalized:
         _write_kwm_fixture(input_root / "kuwo" / "local_e2e.kwm", payload)
+        _write_yeelion_kwm_fixture(input_root / "kuwo" / "local_yeelion.kwma", payload)
     return input_root / "kugou" / "kugou_key.xz"
 
 

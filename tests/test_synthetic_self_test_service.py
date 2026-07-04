@@ -32,6 +32,7 @@ def test_synthetic_self_test_generates_all_platform_inputs_and_runs_verification
         assert (input_root / "kugou" / "kugou_key.xz").exists()
         assert (input_root / "netease" / "local_e2e.ncm").exists()
         assert (input_root / "kuwo" / "local_e2e.kwm").exists()
+        assert (input_root / "kuwo" / "local_yeelion.kwma").exists()
         return SampleVerificationSummary([])
 
     monkeypatch.setattr("src.Application.synthetic_self_test_service.run_sample_verification", fake_run_sample_verification)

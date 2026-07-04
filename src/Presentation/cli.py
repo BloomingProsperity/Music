@@ -484,7 +484,7 @@ def run_interactive() -> int:
     elif platform_id == "netease":
         settings["target_format_ncm"] = prompt_choice("ncm 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("target_format_ncm", "auto")), supported_transcode_formats())
     elif platform_id == "kuwo":
-        settings["target_format_kwm"] = prompt_choice("kwm 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("target_format_kwm", "auto")), supported_transcode_formats())
+        settings["target_format_kwm"] = prompt_choice("kwm/kwma 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("target_format_kwm", "auto")), supported_transcode_formats())
 
     config[platform_id].update(settings)
     config["shared"].update(shared)

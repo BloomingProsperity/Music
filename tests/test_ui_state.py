@@ -36,7 +36,7 @@ def test_platform_specs_keep_core_pages_and_formats() -> None:
     assert all(control.options == ("mp3", "flac", "m4a", "wav") for control in specs[0].format_controls)
     assert specs[1].source_extensions == (".kgm", ".kgma", ".kgg", ".vpr", ".kgm.flac", ".vpr.flac")
     assert specs[2].source_extensions == (".ncm",)
-    assert specs[3].source_extensions == (".kwm",)
+    assert specs[3].source_extensions == (".kwm", ".kwma")
     assert [control.key for control in specs[3].format_controls] == ["target_format_kwm"]
     assert specs[1].enabled is True
     assert specs[2].enabled is True

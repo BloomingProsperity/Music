@@ -7,7 +7,7 @@ from src.Infrastructure.kuwo_decoder import decode_kwm_file, peek_kwm_payload_co
 from src.Infrastructure.transcoder import normalize_target_format
 
 
-SUPPORTED_SUFFIXES = {".kwm"}
+SUPPORTED_SUFFIXES = {".kwm", ".kwma"}
 
 
 @dataclass(slots=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pathlib
+import struct
 import time
 
 from src.Infrastructure.transcoder import detect_audio_container, detect_container_from_header
@@ -11,6 +12,10 @@ HEADER_SIZE = 1024
 KEY_SIZE = 32
 MAX_FIND_KEY_TIME = 468
 STREAM_CHUNK_SIZE = 1024 * 1024
+YEELION_MAGIC = b"yeelion-kuwo-tme"
+YEELION_KEY_OFFSET = 0x18
+YEELION_KEY_SIZE = 8
+YEELION_PREDEFINED_KEY = b"MoOtOiTvINGwd2E6n0E1i7L5t2IoOoNk"
 
 
 class KwmDecodeError(RuntimeError):
@@ -28,6 +33,25 @@ def _swap_key_halves(key: bytes) -> bytes:
     return key[16:32] + key[:16]
 
 
+def _trim_or_repeat_key_text(value: str) -> str:
+    if not value:
+        raise KwmDecodeError("invalid yeelion kwm key")
+    if len(value) >= KEY_SIZE:
+        return value[:KEY_SIZE]
+    repeats = (KEY_SIZE // len(value)) + 1
+    return (value * repeats)[:KEY_SIZE]
+
+
+def _derive_yeelion_key(header: bytes) -> bytes | None:
+    if len(header) < YEELION_KEY_OFFSET + YEELION_KEY_SIZE:
+        return None
+    if header[:len(YEELION_MAGIC)] != YEELION_MAGIC:
+        return None
+    raw_key = struct.unpack_from("<Q", header, YEELION_KEY_OFFSET)[0]
+    key_text = _trim_or_repeat_key_text(str(raw_key))
+    return bytes(left ^ ord(right) for left, right in zip(YEELION_PREDEFINED_KEY, key_text))
+
+
 def find_kwm_key(input_path: pathlib.Path) -> tuple[bytes, str]:
     if input_path.stat().st_size <= HEADER_SIZE + KEY_SIZE:
         raise KwmDecodeError("kwm file is too small")
@@ -35,6 +59,11 @@ def find_kwm_key(input_path: pathlib.Path) -> tuple[bytes, str]:
     previous = bytes(KEY_SIZE)
     last = b""
     with input_path.open("rb") as source:
+        header = source.read(HEADER_SIZE)
+        yeelion_key = _derive_yeelion_key(header)
+        if yeelion_key is not None:
+            return yeelion_key, "yeelion_header"
+
         source.seek(HEADER_SIZE)
         for _ in range(MAX_FIND_KEY_TIME):
             chunk = source.read(KEY_SIZE)
