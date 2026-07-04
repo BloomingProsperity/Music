@@ -60,6 +60,8 @@ python main.py transcode-batch --input D:\music --output D:\mp3 --rule 全部:mp
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BloomingProsperity/Music/codex/one-click-deploy/deploy.ps1 | iex"
 ```
 
+如果电脑没有 Python 3.10+，脚本会优先尝试通过 Windows 自带的 `winget` 自动安装 Python 3.12。
+
 默认安装到：
 
 ```text

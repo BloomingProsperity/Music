@@ -41,6 +41,26 @@ function Find-Python {
     throw "Python 3.10+ was not found. Install Python from https://www.python.org/downloads/windows/ and run this command again."
 }
 
+function Ensure-Python {
+    try {
+        return Find-Python
+    }
+    catch {
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        if ($null -eq $winget) {
+            throw $_
+        }
+
+        Write-Step "Python 3.10+ was not found; installing Python 3.12 with winget"
+        & winget install --id Python.Python.3.12 -e --source winget --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) {
+            throw "winget could not install Python 3.12. Install Python 3.10+ manually and run this command again."
+        }
+
+        return Find-Python
+    }
+}
+
 function Invoke-Python {
     param(
         [hashtable]$Python,
@@ -122,7 +142,7 @@ try {
     Write-Step "Syncing source files"
     Copy-SourceTree -SourceDir $SourceRoot.FullName -TargetDir $InstallDir
 
-    $Python = Find-Python
+    $Python = Ensure-Python
     $VenvDir = Join-Path $InstallDir ".venv"
     $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
