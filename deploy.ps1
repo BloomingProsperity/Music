@@ -1,6 +1,6 @@
 param(
     [string]$InstallDir = "$env:USERPROFILE\QKKDecrypt",
-    [string]$RepoZipUrl = "https://github.com/BloomingProsperity/Music/archive/refs/heads/codex/platforms-ncm-kuwo-upgrade.zip",
+    [string]$RepoZipUrl = "https://github.com/BloomingProsperity/Music/archive/refs/heads/music-gateway.zip",
     [switch]$NoLaunch,
     [switch]$NoShortcut
 )
@@ -121,7 +121,7 @@ function New-DesktopShortcut {
 }
 
 function Get-RemoteRevisionId {
-    param([string]$Branch = "codex/platforms-ncm-kuwo-upgrade")
+    param([string]$Branch = "music-gateway")
     try {
         $encodedBranch = [uri]::EscapeDataString($Branch)
         $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/BloomingProsperity/Music/commits/$encodedBranch" -UseBasicParsing

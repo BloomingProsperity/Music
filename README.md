@@ -36,7 +36,7 @@
 打开 PowerShell，执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BloomingProsperity/Music/codex/platforms-ncm-kuwo-upgrade/deploy.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BloomingProsperity/Music/music-gateway/deploy.ps1 | iex"
 ```
 
 如果电脑没有 Python 3.10+，脚本会尝试通过 `winget` 安装 Python 3.12。

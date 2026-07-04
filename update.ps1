@@ -4,7 +4,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Branch = "codex/platforms-ncm-kuwo-upgrade"
+$Branch = "music-gateway"
 $VersionMarker = Join-Path $Root ".qkk-version"
 
 function Get-RemoteRevisionId {
@@ -29,7 +29,7 @@ if (-not $RepoZipUrl) {
     $RepoZipUrl = $env:QKK_UPDATE_ZIP_URL
 }
 if (-not $RepoZipUrl) {
-    $RepoZipUrl = "https://github.com/BloomingProsperity/Music/archive/refs/heads/codex/platforms-ncm-kuwo-upgrade.zip"
+    $RepoZipUrl = "https://github.com/BloomingProsperity/Music/archive/refs/heads/music-gateway.zip"
 }
 
 $TempRoot = Join-Path $env:TEMP ("qkk-update-" + [guid]::NewGuid().ToString("N"))

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 APP_VERSION = "0.02"
 VERSION_MARKER_FILE = ".qkk-version"
 UPDATE_REPO_URL = "https://github.com/BloomingProsperity/Music.git"
-UPDATE_BRANCH = "codex/platforms-ncm-kuwo-upgrade"
+UPDATE_BRANCH = "music-gateway"
 
 
 @dataclass(frozen=True, slots=True)
