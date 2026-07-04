@@ -12,6 +12,16 @@ def _xor_repeating_key_python(data: bytearray, key: bytes, start_offset: int) ->
         data[index] ^= key[(start_offset + index) % key_len]
 
 
+def _repeating_key_mask(key: bytes, length: int, start_offset: int) -> bytes:
+    if length <= 0:
+        return b""
+    key_len = len(key)
+    offset = start_offset % key_len
+    rotated = key[offset:] + key[:offset]
+    repeat_count = (length + key_len - 1) // key_len
+    return (rotated * repeat_count)[:length]
+
+
 def xor_repeating_key_inplace(data: bytearray, key: bytes, start_offset: int = 0) -> str:
     if not key:
         raise ValueError("xor key must not be empty")
@@ -23,7 +33,6 @@ def xor_repeating_key_inplace(data: bytearray, key: bytes, start_offset: int = 0
         return "python"
 
     view = _np.frombuffer(data, dtype=_np.uint8)
-    key_view = _np.frombuffer(key, dtype=_np.uint8)
-    positions = (_np.arange(view.size, dtype=_np.uint64) + normalized_offset) % key_view.size
-    _np.bitwise_xor(view, key_view[positions], out=view)
+    mask = _np.frombuffer(_repeating_key_mask(key, view.size, normalized_offset), dtype=_np.uint8)
+    _np.bitwise_xor(view, mask, out=view)
     return "numpy"

@@ -4,8 +4,9 @@ import pathlib
 import tempfile
 import unittest
 import json
+from unittest.mock import patch
 
-from src.Infrastructure.config_repository import load_config
+from src.Infrastructure.config_repository import auto_find_kuwo_input_path, load_config
 from src.Infrastructure.runtime_paths import RuntimePaths
 
 
@@ -26,7 +27,8 @@ def _runtime_paths(root: pathlib.Path) -> RuntimePaths:
 class ConfigRepositoryTests(unittest.TestCase):
     def test_default_qq_output_rules_target_mp3_and_auto_transcode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            _, config = load_config(_runtime_paths(pathlib.Path(temp_dir)))
+            with patch("src.Infrastructure.config_repository.auto_find_kuwo_input_path", return_value=None):
+                _, config = load_config(_runtime_paths(pathlib.Path(temp_dir)))
 
             self.assertEqual(
                 config["qq"]["format_rules"],
@@ -45,6 +47,30 @@ class ConfigRepositoryTests(unittest.TestCase):
             self.assertFalse(config["kuwo"]["auto_transcode_after_decode"])
             self.assertIsNone(config["kuwo"]["transcode_sample_rate_hz"])
             self.assertIsNone(config["kuwo"]["transcode_bitrate_kbps"])
+
+    def test_auto_find_kuwo_input_path_returns_download_root_with_supported_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            empty = root / "empty"
+            download = root / "KwDownload"
+            music_pack = download / "song" / "MusicPack"
+            empty.mkdir()
+            music_pack.mkdir(parents=True)
+            (music_pack / "track.kwm").write_bytes(b"kwm")
+
+            with patch("src.Infrastructure.config_repository.iter_kuwo_input_candidates", return_value=[empty, download]):
+                self.assertEqual(auto_find_kuwo_input_path(), download)
+
+    def test_load_config_uses_detected_kuwo_input_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            detected = root / "KwDownload"
+            detected.mkdir()
+
+            with patch("src.Infrastructure.config_repository.auto_find_kuwo_input_path", return_value=detected):
+                _, config = load_config(_runtime_paths(root))
+
+            self.assertEqual(config["kuwo"]["input_dir"], str(detected))
 
     def test_config_preserves_user_defined_transcode_parallelism(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

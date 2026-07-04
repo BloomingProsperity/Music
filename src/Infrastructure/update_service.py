@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
-APP_VERSION = "0.16"
+APP_VERSION = "0.17"
 VERSION_MARKER_FILE = ".qkk-version"
 UPDATE_REPO_URL = "https://github.com/BloomingProsperity/Music.git"
 UPDATE_BRANCH = "music-gateway"
@@ -260,7 +260,7 @@ def run_update(root_dir: pathlib.Path) -> UpdateResult:
     if update_command is None:
         return UpdateResult(
             False,
-            f"没有可用的更新入口。当前版本 {APP_VERSION}；源码目录可使用 git pull，一键部署包请重新运行部署脚本。",
+            f"暂时无法自动更新。当前版本 {APP_VERSION}，请重新安装最新版本。",
             None,
         )
     try:
@@ -278,11 +278,8 @@ def run_update(root_dir: pathlib.Path) -> UpdateResult:
     except Exception as exc:
         return UpdateResult(False, f"更新启动失败：{exc}", None)
 
-    output = "\n".join(part.strip() for part in (completed.stdout, completed.stderr) if part and part.strip())
     if completed.returncode == 0:
         if not (root_dir / ".git").exists():
             _write_local_version_marker(root_dir, _fetch_remote_revision_id())
-        details = f"\n{output}" if output else ""
-        return UpdateResult(True, f"更新完成（{update_command.mode}），当前版本 {resolve_app_version(root_dir)}。{details}", completed.returncode)
-    details = f"\n{output}" if output else ""
-    return UpdateResult(False, f"更新失败（{update_command.mode}, code={completed.returncode}）。{details}", completed.returncode)
+        return UpdateResult(True, f"更新完成，当前版本 {resolve_app_version(root_dir)}，正在准备重启。", completed.returncode)
+    return UpdateResult(False, "更新失败，请稍后重试。", completed.returncode)

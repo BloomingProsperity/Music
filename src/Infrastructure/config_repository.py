@@ -19,10 +19,10 @@ FLET_NOTE = "main-ui 分支采用 PySide6。PySide6 基于 Qt for Python，桌�
 DEFAULT_KUGOU_INPUT = pathlib.Path(r"O:\KuGou\KugouMusic")
 DEFAULT_QQ_INPUT = pathlib.Path("")
 DEFAULT_NETEASE_INPUT = pathlib.Path("")
-DEFAULT_KUWO_INPUT = ""
 TRANSCODE_SAMPLE_RATE_OPTIONS = (22050, 32000, 44100, 48000, 88200, 96000)
 TRANSCODE_BITRATE_OPTIONS = (96, 128, 160, 192, 256, 320)
 DEFAULT_QQ_FORMAT_RULES = {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"}
+KUWO_SUPPORTED_SUFFIXES = {".kwm", ".kwma", ".kwm.flac"}
 
 
 def _read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -84,6 +84,49 @@ def iter_kgg_db_candidates() -> list[pathlib.Path]:
 def auto_find_kgg_db_path() -> pathlib.Path | None:
     for candidate in iter_kgg_db_candidates():
         if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def iter_kuwo_input_candidates() -> list[pathlib.Path]:
+    home = pathlib.Path.home()
+    candidates = [
+        pathlib.Path(r"C:\KwDownload"),
+        home / "KwDownload",
+        home / "Music" / "KwDownload",
+        home / "Downloads" / "KwDownload",
+        home / "Music" / "酷我音乐",
+        home / "Downloads" / "酷我音乐",
+    ]
+    unique: list[pathlib.Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        lowered = str(candidate).lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        unique.append(candidate)
+    return unique
+
+
+def _directory_contains_kuwo_inputs(candidate: pathlib.Path) -> bool:
+    if not candidate.exists() or not candidate.is_dir():
+        return False
+    try:
+        for file_path in candidate.rglob("*"):
+            if not file_path.is_file():
+                continue
+            suffixes = "".join(file_path.suffixes).lower()
+            if file_path.suffix.lower() in KUWO_SUPPORTED_SUFFIXES or suffixes in KUWO_SUPPORTED_SUFFIXES:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def auto_find_kuwo_input_path() -> pathlib.Path | None:
+    for candidate in iter_kuwo_input_candidates():
+        if _directory_contains_kuwo_inputs(candidate):
             return candidate
     return None
 
@@ -163,7 +206,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "auto_transcode_after_decode": False,
         },
         "kuwo": {
-            "input_dir": DEFAULT_KUWO_INPUT,
+            "input_dir": str(auto_find_kuwo_input_path() or ""),
             "output_dir": str(paths.output_dir / "kuwo"),
             "target_format_kwm": "auto",
             "transcode_sample_rate_hz": None,
