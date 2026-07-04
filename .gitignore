@@ -18,6 +18,7 @@ build_hotfix/
 _log/
 _research/
 _work/
+.superpowers/
 plugins/
 output/
 

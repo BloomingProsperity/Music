@@ -228,7 +228,7 @@ def run_transcode_batch(
             "total_jobs": len(jobs),
             "warnings": list(warnings),
             "output_dir": str(pathlib.Path(output_dir)),
-            "worker_count": max(1, min(int(max_workers or 1), 4)),
+            "worker_count": max(1, int(max_workers or 1)),
         },
     )
     for warning in warnings:
@@ -254,7 +254,7 @@ def run_transcode_batch(
             elapsed_sec=elapsed_sec,
         )
 
-    worker_count = max(1, min(int(max_workers or 1), 4))
+    worker_count = max(1, int(max_workers or 1))
     queued = len(jobs)
     running = 0
     completed = 0

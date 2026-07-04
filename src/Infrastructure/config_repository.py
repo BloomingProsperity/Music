@@ -128,6 +128,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "transcode_max_workers": 2,
             "embed_cover_art": True,
             "supplement_album_metadata": False,
+            "group_by_artist": False,
             "always_run_as_admin": False,
         },
         "qq": {
@@ -220,7 +221,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
         shared_transcode_enabled = bool(shared_transcode_enabled)
     config["shared"]["transcode_enabled"] = shared_transcode_enabled
     try:
-        config["shared"]["transcode_max_workers"] = max(1, min(int(config["shared"].get("transcode_max_workers", 2) or 2), 4))
+        config["shared"]["transcode_max_workers"] = max(1, int(config["shared"].get("transcode_max_workers", 2) or 2))
     except Exception:
         config["shared"]["transcode_max_workers"] = 2
 
@@ -230,6 +231,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     else:
         shared_always_run_as_admin = bool(shared_always_run_as_admin)
     config["shared"]["always_run_as_admin"] = shared_always_run_as_admin
+    config["shared"]["group_by_artist"] = _normalize_config_bool(config["shared"].get("group_by_artist"), False)
 
     format_rules = config["qq"].get("format_rules")
     if not isinstance(format_rules, dict):
@@ -274,7 +276,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     transcode_batch["output_dir"] = str(transcode_batch.get("output_dir") or (paths.output_dir / "transcode"))
     transcode_batch["recursive"] = bool(transcode_batch.get("recursive", True))
     try:
-        transcode_batch["max_workers"] = max(1, min(int(transcode_batch.get("max_workers", 2) or 2), 4))
+        transcode_batch["max_workers"] = max(1, int(transcode_batch.get("max_workers", 2) or 2))
     except Exception:
         transcode_batch["max_workers"] = 2
     raw_rules = transcode_batch.get("rules", [])

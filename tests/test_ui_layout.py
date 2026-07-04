@@ -5,7 +5,7 @@ import pathlib
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QScrollArea
+from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox
 
 from src.Presentation.ui_app import MainWindow
 
@@ -94,7 +94,7 @@ def test_starting_netease_page_uses_shared_batch_runner(tmp_path: pathlib.Path, 
     }
 
 
-def test_progress_advances_when_file_decrypted_event_arrives() -> None:
+def test_file_decrypted_updates_current_file_without_marking_complete() -> None:
     app = _app()
     window = MainWindow()
 
@@ -110,9 +110,82 @@ def test_progress_advances_when_file_decrypted_event_arrives() -> None:
     )
     app.processEvents()
 
-    assert window.progress.value() == 50
-    assert window.progress_label.text() == "进度 2 / 4"
+    assert window.progress.value() == 25
+    assert window.progress_label.text() == "解密 1 / 4"
     assert window.current_file.text() == "当前文件 two.mflac"
+
+
+def test_ui_splits_decrypt_and_transcode_progress() -> None:
+    app = _app()
+    window = MainWindow()
+
+    decrypt_progress = window.findChild(QProgressBar, "DecryptProgress")
+    transcode_progress = window.findChild(QProgressBar, "TranscodeProgress")
+    decrypt_label = window.findChild(QLabel, "DecryptProgressLabel")
+    transcode_label = window.findChild(QLabel, "TranscodeProgressLabel")
+    assert decrypt_progress is not None
+    assert transcode_progress is not None
+    assert decrypt_label is not None
+    assert transcode_label is not None
+
+    window._handle_run_event("batch_started", {"candidate_count": 20})
+    window._handle_run_event(
+        "file_decrypted",
+        {
+            "index": 1,
+            "total": 20,
+            "input_path": r"C:\music\one.mflac",
+        },
+    )
+    window._handle_run_event("batch_transcode_started", {"pending_count": 12, "worker_count": 8})
+    window._handle_run_event(
+        "batch_transcode_progress",
+        {
+            "completed": 3,
+            "total_jobs": 12,
+            "success_count": 3,
+            "failed_count": 0,
+            "queued": 9,
+            "input_path": r"C:\music\three.mflac",
+        },
+    )
+    app.processEvents()
+
+    assert decrypt_progress.value() == 5
+    assert decrypt_label.text() == "解密 1 / 20"
+    assert transcode_progress.value() == 25
+    assert transcode_label.text() == "转码 3 / 12"
+    assert window.findChild(QLabel, "DecodeSuccessRate").text() == "解密成功率 100%"
+    assert window.findChild(QLabel, "TranscodeSuccessRate").text() == "转码成功率 100%"
+
+
+def test_batch_finished_without_total_keeps_existing_total_for_stopped_run() -> None:
+    app = _app()
+    window = MainWindow()
+
+    window._handle_run_event("batch_started", {"candidate_count": 4})
+    window._handle_run_event("batch_finished", {"completed": 2, "success_count": 2, "failed_count": 0, "skipped_count": 0})
+    app.processEvents()
+
+    assert window.progress.value() == 50
+    assert window.progress_label.text() == "解密 2 / 4"
+
+
+def test_ui_keeps_output_open_and_artist_grouping_controls() -> None:
+    _app()
+    window = MainWindow()
+    page = window.pages["qq"]
+
+    open_button = page.output_dir.findChild(QPushButton, "OpenOutputButton")
+    artist_grouping = page.findChild(QCheckBox, "GroupByArtist")
+    workers = page.findChild(QSpinBox, "TranscodeWorkers")
+
+    assert open_button is not None
+    assert open_button.text() == "打开"
+    assert artist_grouping is not None
+    assert artist_grouping.text() == "按音乐作者分类"
+    assert workers is not None
+    assert workers.maximum() >= 999
 
 
 def test_file_finished_updates_progress_counts_immediately() -> None:
@@ -151,11 +224,52 @@ def test_file_finished_updates_progress_counts_immediately() -> None:
     app.processEvents()
 
     assert window.progress.value() == 100
-    assert window.progress_label.text() == "进度 3 / 3"
+    assert window.progress_label.text() == "解密 3 / 3"
     assert window.success_label.text() == "成功 1"
     assert window.failed_label.text() == "失败 1"
     assert window.skipped_label.text() == "跳过 1"
     assert window.current_file.text() == "当前文件 three.mflac"
+
+
+def test_file_finished_without_index_uses_recorded_counts_for_progress() -> None:
+    app = _app()
+    window = MainWindow()
+
+    window._handle_run_event("batch_started", {"candidate_count": 3})
+    window._handle_run_event(
+        "file_finished",
+        {
+            "result": "success",
+            "input_path": r"C:\music\one.mflac",
+        },
+    )
+    app.processEvents()
+
+    assert window.progress.value() == 33
+    assert window.progress_label.text() == "解密 1 / 3"
+    assert window.success_label.text() == "成功 1"
+
+
+def test_batch_finished_accepts_total_jobs_payload() -> None:
+    app = _app()
+    window = MainWindow()
+
+    window._handle_run_event(
+        "batch_finished",
+        {
+            "total_jobs": 4,
+            "success_count": 2,
+            "failed_count": 1,
+            "skipped_count": 1,
+        },
+    )
+    app.processEvents()
+
+    assert window.progress.value() == 100
+    assert window.progress_label.text() == "解密 4 / 4"
+    assert window.success_label.text() == "成功 2"
+    assert window.failed_label.text() == "失败 1"
+    assert window.skipped_label.text() == "跳过 1"
 
 
 def test_sidebar_shows_default_version_and_update_button() -> None:
@@ -193,4 +307,28 @@ def test_update_button_runs_update_service_and_logs_result(monkeypatch) -> None:
     app.processEvents()
 
     assert calls == [window.paths.root_dir]
-    assert "已更新到最新版本" in window.log_view.toPlainText()
+    status_message = window.findChild(QLabel, "StatusMessage")
+    assert status_message is not None
+    assert "已更新到最新版本" in status_message.text()
+
+
+def test_run_panel_removes_black_log_box() -> None:
+    _app()
+    window = MainWindow()
+
+    assert window.findChild(QPlainTextEdit, "Log") is None
+
+
+def test_run_progress_layout_stacks_when_window_is_narrow() -> None:
+    app = _app()
+    window = MainWindow()
+    window.resize(window.minimumWidth(), window.minimumHeight())
+    window.show()
+    app.processEvents()
+
+    assert window.run_progress_layout.direction() == QBoxLayout.Direction.TopToBottom
+
+    window.resize(1180, window.height())
+    app.processEvents()
+
+    assert window.run_progress_layout.direction() == QBoxLayout.Direction.LeftToRight

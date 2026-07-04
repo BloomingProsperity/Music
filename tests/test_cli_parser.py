@@ -49,6 +49,15 @@ class CliParserTests(unittest.TestCase):
             self.assertEqual(args.bitrate, 320)
             self.assertEqual(args.transcode_workers, 2)
 
+    def test_decrypt_parser_allows_user_defined_transcode_parallelism(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            parser = build_parser(_runtime_paths(root))
+
+            args = parser.parse_args(["qq", "decrypt", "--transcode-workers", "8"])
+
+            self.assertEqual(args.transcode_workers, 8)
+
     def test_qq_decrypt_parser_accepts_local_mode_options(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)
@@ -239,6 +248,11 @@ class CliParserTests(unittest.TestCase):
                 mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
                 mock.patch.object(cli, "load_config", return_value=({}, config)),
                 mock.patch.object(cli, "run_sample_verification", return_value=summary) as verify,
+                mock.patch.object(
+                    cli,
+                    "write_sample_verification_reports",
+                    return_value=(root / "out" / "sample_verify_report.json", root / "out" / "sample_verify_report.txt"),
+                ) as write_reports,
             ):
                 result = cli.main(
                     [
@@ -257,6 +271,7 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(verify.call_args.kwargs["input_paths"], [pathlib.Path(root)])
         self.assertEqual(verify.call_args.kwargs["output_dir"], pathlib.Path(root / "out"))
         self.assertEqual(verify.call_args.kwargs["platforms"], ("netease",))
+        write_reports.assert_called_once_with(summary, pathlib.Path(root / "out"))
 
 
 if __name__ == "__main__":

@@ -84,7 +84,9 @@ python main.py transcode-batch --input D:\music --output D:\mp3 --rule 全部:mp
 python main.py qq decrypt --input D:\ --output C:\qkk_mp3 --format-mflac mp3 --bitrate 320 --transcode-workers 2 --no-embed-cover
 ```
 
-`--transcode-workers` 可设为 `1` 到 `4`。机械盘/U 盘建议 `1` 或 `2`，CPU 和 SSD 都有余量时再提高。
+`--transcode-workers` 和 `--max-workers` 接受正整数，不再限制为 4。机械盘/U 盘建议 `1` 或 `2`，CPU 和 SSD 都有余量时再提高。
+
+UI 里的输出目录支持一键打开，也可以勾选“按音乐作者分类”，让同一作者的输出文件自动进入对应子目录。批量解密时，已解密且需要转码的文件超过 10 个后会启动同步转码队列，界面会分别显示解密和转码进度、成功数、失败数和成功率。
 
 支持输入格式：`flac` / `m4a` / `mp3` / `wav` / `ogg` / `aac` / `ape`。
 支持输出格式：`mp3` / `flac` / `m4a` / `wav`。
@@ -104,6 +106,8 @@ python main.py sample-verify --input D:\music --output C:\qkk_sample_verify --pl
 ```powershell
 python main.py sample-verify --input C:\music --input D:\music --output C:\qkk_sample_verify --platform netease --platform kuwo
 ```
+
+每次验证都会在输出目录生成 `sample_verify_report.json` 和 `sample_verify_report.txt`，用于回看候选数量、严格解码通过数量、失败原因和已验证输出文件路径。
 
 ## UI 路线
 

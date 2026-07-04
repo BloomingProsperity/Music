@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import subprocess
@@ -62,6 +63,59 @@ class SampleVerificationSummary:
         return 0
 
 
+def _sample_result_to_dict(result: SamplePlatformResult) -> dict[str, Any]:
+    return {
+        "platform_id": result.platform_id,
+        "input_path": str(result.input_path),
+        "candidate_count": result.candidate_count,
+        "status": result.status,
+        "result_code": result.result_code,
+        "verified_outputs": [str(path) for path in result.verified_outputs],
+        "reason": result.reason,
+    }
+
+
+def sample_verification_summary_to_dict(summary: SampleVerificationSummary) -> dict[str, Any]:
+    return {
+        "exit_code": summary.exit_code,
+        "total_candidates": summary.total_candidates,
+        "verified_count": summary.verified_count,
+        "failed_count": summary.failed_count,
+        "not_found_count": summary.not_found_count,
+        "results": [_sample_result_to_dict(result) for result in summary.results],
+    }
+
+
+def write_sample_verification_reports(summary: SampleVerificationSummary, report_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    report_dir = report_dir.expanduser().resolve()
+    report_dir.mkdir(parents=True, exist_ok=True)
+    json_path = report_dir / "sample_verify_report.json"
+    text_path = report_dir / "sample_verify_report.txt"
+
+    report = sample_verification_summary_to_dict(summary)
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    lines = [
+        f"exit_code={summary.exit_code}",
+        f"total_candidates={summary.total_candidates}",
+        f"verified_count={summary.verified_count}",
+        f"failed_count={summary.failed_count}",
+        f"not_found_count={summary.not_found_count}",
+    ]
+    for result in summary.results:
+        lines.append(
+            f"{result.platform_id} {result.status} "
+            f"candidates={result.candidate_count} verified_outputs={len(result.verified_outputs)}"
+        )
+        lines.append(f"  input={result.input_path}")
+        if result.reason:
+            lines.append(f"  reason={result.reason}")
+        for output_path in result.verified_outputs:
+            lines.append(f"  output={output_path}")
+    text_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return json_path, text_path
+
+
 def _dedupe_paths(paths: Iterable[pathlib.Path]) -> list[pathlib.Path]:
     seen: set[str] = set()
     result: list[pathlib.Path] = []
@@ -81,7 +135,7 @@ def _target_settings(platform_id: str, base_settings: dict[str, Any], *, max_wor
         {
             "transcode_enabled": True,
             "auto_transcode_after_decode": True,
-            "transcode_max_workers": max(1, min(int(max_workers or 1), 4)),
+            "transcode_max_workers": max(1, int(max_workers or 1)),
             "transcode_bitrate_kbps": int(bitrate_kbps),
             "embed_cover_art": False,
             "supplement_album_metadata": False,

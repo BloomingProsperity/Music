@@ -7,7 +7,11 @@ import sys
 from typing import Any, Callable
 
 from src.Application.decrypt_service import run_batch
-from src.Application.sample_verification_service import DEFAULT_SAMPLE_PLATFORMS, run_sample_verification
+from src.Application.sample_verification_service import (
+    DEFAULT_SAMPLE_PLATFORMS,
+    run_sample_verification,
+    write_sample_verification_reports,
+)
 from src.Application.transcode_batch_service import (
     ALL_SOURCE_FORMAT,
     run_transcode_batch,
@@ -161,7 +165,7 @@ def _run_transcode_batch_cli(paths: RuntimePaths, config: dict[str, Any], args: 
         return 2
     output_dir = pathlib.Path(args.output or transcode_config.get("output_dir") or (paths.output_dir / "transcode"))
     recursive = not bool(args.no_recursive)
-    max_workers = max(1, min(int(args.max_workers or transcode_config.get("max_workers", 2) or 2), 4))
+    max_workers = max(1, int(args.max_workers or transcode_config.get("max_workers", 2) or 2))
     rules = [parse_transcode_rule_spec(item) for item in (args.rule or [])] or list(transcode_config.get("rules", []))
     if not rules:
         rules = [{"source_format": ALL_SOURCE_FORMAT, "target_format": "m4a", "sample_rate_hz": None, "bitrate_kbps": None}]
@@ -217,6 +221,9 @@ def _run_sample_verify_cli(paths: RuntimePaths, config: dict[str, Any], args: ar
         else:
             print(f"{label}: 验证失败 {item.reason}")
     print(f"样本扫描完成：候选 {summary.total_candidates}，严格验证通过 {summary.verified_count}，失败 {summary.failed_count}")
+    json_report, text_report = write_sample_verification_reports(summary, output_dir)
+    print(f"验证报告：{json_report}")
+    print(f"文本报告：{text_report}")
     if summary.exit_code == 3:
         print("未找到可验证样本，不能视为平台真实样本验证完成。")
     return summary.exit_code
@@ -350,7 +357,7 @@ def _run_platform(platform_id: str, config: dict, *, input_override: str | None 
     shared = dict(config["shared"])
     settings = dict(config[platform_id])
     settings["transcode_enabled"] = bool(shared.get("transcode_enabled", True))
-    settings["transcode_max_workers"] = max(1, min(int(shared.get("transcode_max_workers", 2) or 2), 4))
+    settings["transcode_max_workers"] = max(1, int(shared.get("transcode_max_workers", 2) or 2))
     settings["embed_cover_art"] = bool(shared.get("embed_cover_art", True))
     settings["supplement_album_metadata"] = bool(shared.get("supplement_album_metadata", False))
     input_path = pathlib.Path(input_override or settings.get("input_dir") or "")
@@ -494,7 +501,7 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
         transcode_group = dec.add_mutually_exclusive_group()
         transcode_group.add_argument("--transcode", dest="transcode_enabled", action="store_true", help="转码为目标格式")
         transcode_group.add_argument("--no-transcode", dest="transcode_enabled", action="store_false", help="不转码，直接输出解密后的原始音频格式")
-        dec.add_argument("--transcode-workers", type=int, choices=[1, 2, 3, 4], help="平台解密后统一转码的并发数，1-4")
+        dec.add_argument("--transcode-workers", type=int, help="平台解密后转码的并发数，正整数")
         dec.add_argument("--sample-rate", type=int, choices=TRANSCODE_SAMPLE_RATE_OPTIONS, help="转码采样率 Hz")
         dec.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3/m4a 转码码率 kbps")
         album_group = dec.add_mutually_exclusive_group()
@@ -506,7 +513,7 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
     transcode_parser.add_argument("--input", action="append", help="输入文件或目录，可重复传入")
     transcode_parser.add_argument("--output", help="输出目录")
     transcode_parser.add_argument("--no-recursive", action="store_true", help="禁用递归扫描")
-    transcode_parser.add_argument("--max-workers", type=int, choices=[1, 2, 3, 4], help="并发转码任务数，1-4")
+    transcode_parser.add_argument("--max-workers", type=int, help="并发转码任务数，正整数")
     transcode_parser.add_argument("--rule", action="append", help="规则格式：<source>:<target>[:sample_rate_hz[:bitrate_kbps]]，例如 全部:m4a:48000:256")
 
     verify_parser = sub.add_parser("sample-verify", help="扫描真实样本并解密转码为 mp3 后严格验证")
@@ -514,7 +521,7 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
     verify_parser.add_argument("--output", help="验证输出目录，默认 C:\\qkk_sample_verify")
     verify_parser.add_argument("--platform", dest="verify_platform", action="append", choices=("all", *DEFAULT_SAMPLE_PLATFORMS), help="验证平台，可重复传入，默认 all")
     verify_parser.add_argument("--no-recursive", action="store_true", help="禁用递归扫描")
-    verify_parser.add_argument("--max-workers", type=int, choices=[1, 2, 3, 4], help="平台解密后统一转码并发数，1-4")
+    verify_parser.add_argument("--max-workers", type=int, help="平台解密后转码并发数，正整数")
     verify_parser.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3 验证输出码率 kbps")
     return parser
 

@@ -85,6 +85,18 @@ def test_build_qq_batch_config_preserves_paths_formats_and_transcode_options() -
     assert batch_config.settings["qq_cache_ekeys"] is True
 
 
+def test_build_qq_batch_config_does_not_cap_user_transcode_parallelism() -> None:
+    options = PlatformRunOptions(
+        input_path=pathlib.Path(r"C:\music\qq"),
+        output_dir=pathlib.Path(r"C:\music\mp3"),
+        transcode_max_workers=12,
+    )
+
+    batch_config = build_qq_batch_config(options)
+
+    assert batch_config.settings["transcode_max_workers"] == 12
+
+
 def test_build_platform_batch_config_preserves_netease_settings_and_callbacks() -> None:
     seen: list[tuple[str, dict]] = []
     options = PlatformRunOptions(

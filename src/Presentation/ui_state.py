@@ -41,6 +41,7 @@ class PlatformRunOptions:
     transcode_max_workers: int = 2
     embed_cover_art: bool = False
     supplement_album_metadata: bool = False
+    group_by_artist: bool = False
     sample_rate_hz: int | None = None
     bitrate_kbps: int | None = 320
     qq_fetch_missing_ekey: bool = True
@@ -111,7 +112,7 @@ def platform_specs() -> list[PlatformSpec]:
 
 
 def _clamp_workers(value: int) -> int:
-    return max(1, min(int(value or 2), 4))
+    return max(1, int(value or 2))
 
 
 def _normalize_format_rules(raw: dict[str, str]) -> dict[str, str]:
@@ -175,6 +176,7 @@ def build_qq_batch_config(options: PlatformRunOptions) -> BatchRunConfig:
         "transcode_max_workers": _clamp_workers(options.transcode_max_workers),
         "embed_cover_art": bool(options.embed_cover_art),
         "supplement_album_metadata": bool(options.supplement_album_metadata),
+        "group_by_artist": bool(options.group_by_artist),
         "transcode_sample_rate_hz": options.sample_rate_hz,
         "transcode_bitrate_kbps": options.bitrate_kbps,
         "auto_transcode_after_decode": True,
@@ -201,6 +203,7 @@ def _common_batch_settings(options: PlatformRunOptions) -> dict[str, Any]:
         "transcode_max_workers": _clamp_workers(options.transcode_max_workers),
         "embed_cover_art": bool(options.embed_cover_art),
         "supplement_album_metadata": bool(options.supplement_album_metadata),
+        "group_by_artist": bool(options.group_by_artist),
         "transcode_sample_rate_hz": options.sample_rate_hz,
         "transcode_bitrate_kbps": options.bitrate_kbps,
         "auto_transcode_after_decode": True,

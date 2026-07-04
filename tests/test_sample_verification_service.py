@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 from types import SimpleNamespace
 
 from src.Application.models import BatchRunConfig
-from src.Application.sample_verification_service import SamplePlatformResult, SampleVerificationSummary, _strict_decode, run_sample_verification
+from src.Application.sample_verification_service import (
+    SamplePlatformResult,
+    SampleVerificationSummary,
+    _strict_decode,
+    run_sample_verification,
+    write_sample_verification_reports,
+)
 from src.Infrastructure.runtime_paths import RuntimePaths
 
 
@@ -192,3 +199,35 @@ def test_strict_decode_uses_xerror_so_ffmpeg_warnings_cannot_be_ignored(tmp_path
 
     assert result.ok is True
     assert "-xerror" in captured["command"]
+
+
+def test_write_sample_verification_reports_persists_json_and_text(tmp_path: pathlib.Path) -> None:
+    verified = tmp_path / "out" / "song.mp3"
+    summary = SampleVerificationSummary(
+        [
+            SamplePlatformResult(
+                "netease",
+                tmp_path / "music",
+                1,
+                "verified",
+                result_code=0,
+                verified_outputs=[verified],
+            ),
+            SamplePlatformResult("kuwo", tmp_path / "music", 0, "not_found"),
+        ]
+    )
+
+    json_path, text_path = write_sample_verification_reports(summary, tmp_path / "reports")
+
+    assert json_path.name == "sample_verify_report.json"
+    assert text_path.name == "sample_verify_report.txt"
+    assert json_path.exists()
+    assert text_path.exists()
+    json_text = json_path.read_text(encoding="utf-8")
+    text = text_path.read_text(encoding="utf-8")
+    report = json.loads(json_text)
+    assert '"exit_code": 3' in json_text
+    assert '"platform_id": "netease"' in json_text
+    assert report["results"][0]["verified_outputs"] == [str(verified)]
+    assert "netease verified candidates=1 verified_outputs=1" in text
+    assert "kuwo not_found candidates=0 verified_outputs=0" in text

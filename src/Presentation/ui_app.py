@@ -6,7 +6,8 @@ import threading
 import time
 from typing import Any
 
-from PySide6.QtCore import QObject, QTimer, Qt, Signal
+from PySide6.QtCore import QObject, QTimer, Qt, Signal, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
@@ -21,7 +22,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -80,9 +80,10 @@ class UiBridge(QObject):
 
 
 class PathRow(QWidget):
-    def __init__(self, label: str, *, allow_file: bool = False) -> None:
+    def __init__(self, label: str, *, allow_file: bool = False, allow_open: bool = False) -> None:
         super().__init__()
         self.allow_file = allow_file
+        self.allow_open = allow_open
         self.setMinimumHeight(62)
         root = QGridLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -106,13 +107,21 @@ class PathRow(QWidget):
         self.file_button.setFixedWidth(60)
         self.file_button.setFixedHeight(32)
         self.file_button.setVisible(allow_file)
-        root.addWidget(title, 0, 0, 1, 3)
+        self.open_button = QPushButton("打开")
+        self.open_button.setObjectName("OpenOutputButton")
+        self.open_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.open_button.setFixedWidth(60)
+        self.open_button.setFixedHeight(32)
+        self.open_button.setVisible(allow_open)
+        root.addWidget(title, 0, 0, 1, 4)
         root.addWidget(self.edit, 1, 0)
         root.addWidget(self.dir_button, 1, 1)
         root.addWidget(self.file_button, 1, 2)
+        root.addWidget(self.open_button, 1, 3)
         root.setColumnStretch(0, 1)
         self.dir_button.clicked.connect(self._choose_dir)
         self.file_button.clicked.connect(self._choose_file)
+        self.open_button.clicked.connect(self._open_path)
 
     def text(self) -> str:
         return self.edit.text().strip()
@@ -132,6 +141,14 @@ class PathRow(QWidget):
         selected, _ = QFileDialog.getOpenFileName(self, "选择文件", start, "音频文件 (*.*)")
         if selected:
             self.set_text(selected)
+
+    def _open_path(self) -> None:
+        value = self.text()
+        if not value:
+            return
+        path = pathlib.Path(value)
+        path.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
 
 class PlatformPage(QWidget):
@@ -175,7 +192,7 @@ class PlatformPage(QWidget):
         self.form_layout.setSpacing(10)
 
         self.input_path = PathRow("输入路径", allow_file=True)
-        self.output_dir = PathRow("输出目录")
+        self.output_dir = PathRow("输出目录", allow_open=True)
         self.form_layout.addWidget(self.input_path)
         self.form_layout.addWidget(self.output_dir)
 
@@ -215,8 +232,8 @@ class PlatformPage(QWidget):
         self.options_panel.setMinimumWidth(320)
         self.options_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         option_grid = QGridLayout(self.options_panel)
-        option_grid.setContentsMargins(14, 12, 14, 12)
-        option_grid.setHorizontalSpacing(12)
+        option_grid.setContentsMargins(12, 12, 12, 12)
+        option_grid.setHorizontalSpacing(8)
         option_grid.setVerticalSpacing(8)
 
         self.recursive = QCheckBox("递归扫描")
@@ -227,6 +244,9 @@ class PlatformPage(QWidget):
         self.cover.setChecked(False)
         self.album = QCheckBox("专辑信息")
         self.album.setChecked(False)
+        self.group_by_artist = QCheckBox("按音乐作者分类")
+        self.group_by_artist.setObjectName("GroupByArtist")
+        self.group_by_artist.setChecked(False)
         self.fetch_ekey = QCheckBox("补取 ekey")
         self.fetch_ekey.setChecked(True)
         self.cache_ekey = QCheckBox("缓存 ekey")
@@ -235,23 +255,24 @@ class PlatformPage(QWidget):
         self.sample_rate = QComboBox()
         self.sample_rate.setObjectName("Combo")
         self.sample_rate.setFixedHeight(32)
-        self.sample_rate.setMinimumWidth(112)
+        self.sample_rate.setMinimumWidth(96)
         self.sample_rate.addItem("原采样率", None)
         for value in TRANSCODE_SAMPLE_RATE_OPTIONS:
             self.sample_rate.addItem(str(value), value)
         self.bitrate = QComboBox()
         self.bitrate.setObjectName("Combo")
         self.bitrate.setFixedHeight(32)
-        self.bitrate.setMinimumWidth(112)
+        self.bitrate.setMinimumWidth(96)
         for value in TRANSCODE_BITRATE_OPTIONS:
             self.bitrate.addItem(str(value), value)
         self.bitrate.setCurrentText("320")
 
         self.workers = QSpinBox()
         self.workers.setObjectName("Spin")
+        self.workers.setObjectName("TranscodeWorkers")
         self.workers.setFixedHeight(32)
-        self.workers.setMinimumWidth(80)
-        self.workers.setRange(1, 4)
+        self.workers.setMinimumWidth(72)
+        self.workers.setRange(1, 9999)
         self.workers.setValue(2)
 
         option_grid.addWidget(self.recursive, 0, 0)
@@ -266,6 +287,7 @@ class PlatformPage(QWidget):
         option_grid.addWidget(self.workers, 2, 1)
         option_grid.addWidget(self.fetch_ekey, 2, 2)
         option_grid.addWidget(self.cache_ekey, 2, 3)
+        option_grid.addWidget(self.group_by_artist, 3, 0, 1, 2)
         option_grid.setColumnStretch(1, 1)
         option_grid.setColumnStretch(3, 1)
         self.config_layout.addWidget(self.format_box, 1)
@@ -366,6 +388,10 @@ class MainWindow(QWidget):
         self.updating = False
         self.started_at = 0.0
         self._run_counts = {"success": 0, "failed": 0, "skipped": 0}
+        self._run_total = 0
+        self._decoded_inputs: set[str] = set()
+        self._transcode_counts = {"success": 0, "failed": 0, "waiting": 0}
+        self._transcode_total = 0
         self.pages: dict[str, PlatformPage] = {}
         self.specs = platform_specs()
         self._build_ui()
@@ -432,51 +458,119 @@ class MainWindow(QWidget):
         run_panel.setObjectName("Panel")
         run_layout = QVBoxLayout(run_panel)
         run_layout.setContentsMargins(16, 12, 16, 12)
-        run_layout.setSpacing(7)
+        run_layout.setSpacing(10)
 
         top = QHBoxLayout()
-        self.progress_label = QLabel("进度 0 / 0")
-        self.progress_label.setObjectName("Muted")
-        self.current_file = QLabel("当前文件 -")
-        self.current_file.setObjectName("Muted")
-        self.current_file.setMinimumWidth(120)
-        self.current_file.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.stop_button = QPushButton("停止")
         self.stop_button.setObjectName("DangerButton")
         self.stop_button.setEnabled(False)
         self.stop_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        top.addWidget(self.progress_label)
-        top.addWidget(self.current_file, 1)
+        self.status_message = QLabel("客户端已启动")
+        self.status_message.setObjectName("StatusMessage")
+        self.status_message.setWordWrap(True)
+        self.status_message.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        top.addWidget(self.status_message, 1)
         top.addWidget(self.stop_button)
         run_layout.addLayout(top)
 
+        self.run_progress_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.run_progress_layout.setSpacing(12)
+
+        decrypt_card = QFrame()
+        decrypt_card.setObjectName("StatusBlock")
+        decrypt_layout = QVBoxLayout(decrypt_card)
+        decrypt_layout.setContentsMargins(12, 10, 12, 10)
+        decrypt_layout.setSpacing(8)
+        decrypt_head = QHBoxLayout()
+        self.progress_label = QLabel("解密 0 / 0")
+        self.progress_label.setObjectName("DecryptProgressLabel")
+        self.current_file = QLabel("当前文件 -")
+        self.current_file.setObjectName("Muted")
+        self.current_file.setMinimumWidth(120)
+        self.current_file.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        decrypt_head.addWidget(self.progress_label)
+        decrypt_head.addWidget(self.current_file, 1)
+        decrypt_layout.addLayout(decrypt_head)
         self.progress = QProgressBar()
-        self.progress.setObjectName("Progress")
+        self.progress.setObjectName("DecryptProgress")
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
-        run_layout.addWidget(self.progress)
-
-        stats = QHBoxLayout()
+        decrypt_layout.addWidget(self.progress)
+        decrypt_stats = QHBoxLayout()
         self.success_label = QLabel("成功 0")
         self.failed_label = QLabel("失败 0")
         self.skipped_label = QLabel("跳过 0")
-        self.elapsed_label = QLabel("耗时 0.0s")
-        for label in (self.success_label, self.failed_label, self.skipped_label, self.elapsed_label):
+        self.decode_rate_label = QLabel("解密成功率 0%")
+        self.decode_rate_label.setObjectName("DecodeSuccessRate")
+        for label in (self.success_label, self.failed_label, self.skipped_label):
             label.setObjectName("Stat")
-            stats.addWidget(label)
-        stats.addStretch(1)
-        run_layout.addLayout(stats)
+            decrypt_stats.addWidget(label)
+        decrypt_stats.addWidget(self.decode_rate_label)
+        decrypt_stats.addStretch(1)
+        decrypt_layout.addLayout(decrypt_stats)
 
-        self.log_view = QPlainTextEdit()
-        self.log_view.setObjectName("Log")
-        self.log_view.setReadOnly(True)
-        self.log_view.setMinimumHeight(52)
-        self.log_view.setMaximumHeight(72)
-        run_layout.addWidget(self.log_view, 1)
-        run_panel.setMinimumHeight(152)
+        transcode_card = QFrame()
+        transcode_card.setObjectName("StatusBlock")
+        transcode_layout = QVBoxLayout(transcode_card)
+        transcode_layout.setContentsMargins(12, 10, 12, 10)
+        transcode_layout.setSpacing(8)
+        transcode_head = QHBoxLayout()
+        self.transcode_progress_label = QLabel("转码 0 / 0")
+        self.transcode_progress_label.setObjectName("TranscodeProgressLabel")
+        self.transcode_current_file = QLabel("当前文件 -")
+        self.transcode_current_file.setObjectName("Muted")
+        self.transcode_current_file.setMinimumWidth(120)
+        self.transcode_current_file.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        transcode_head.addWidget(self.transcode_progress_label)
+        transcode_head.addWidget(self.transcode_current_file, 1)
+        transcode_layout.addLayout(transcode_head)
+        self.transcode_progress = QProgressBar()
+        self.transcode_progress.setObjectName("TranscodeProgress")
+        self.transcode_progress.setRange(0, 100)
+        self.transcode_progress.setValue(0)
+        self.transcode_progress.setTextVisible(False)
+        transcode_layout.addWidget(self.transcode_progress)
+        transcode_stats = QHBoxLayout()
+        self.transcode_success_label = QLabel("成功 0")
+        self.transcode_failed_label = QLabel("失败 0")
+        self.transcode_waiting_label = QLabel("等待 0")
+        self.transcode_rate_label = QLabel("转码成功率 0%")
+        self.transcode_rate_label.setObjectName("TranscodeSuccessRate")
+        self.elapsed_label = QLabel("耗时 0.0s")
+        for label in (
+            self.transcode_success_label,
+            self.transcode_failed_label,
+            self.transcode_waiting_label,
+            self.elapsed_label,
+        ):
+            label.setObjectName("Stat")
+            transcode_stats.addWidget(label)
+        transcode_stats.addWidget(self.transcode_rate_label)
+        transcode_stats.addStretch(1)
+        transcode_layout.addLayout(transcode_stats)
+
+        self.run_progress_layout.addWidget(decrypt_card, 1)
+        self.run_progress_layout.addWidget(transcode_card, 1)
+        run_layout.addLayout(self.run_progress_layout)
+        self.run_panel = run_panel
+        run_panel.setMinimumHeight(166)
         content.addWidget(run_panel, 0)
         root.addLayout(content, 1)
+        QTimer.singleShot(0, self._update_run_layout)
+
+    def resizeEvent(self, event: object) -> None:
+        super().resizeEvent(event)  # type: ignore[arg-type]
+        QTimer.singleShot(0, self._update_run_layout)
+
+    def _update_run_layout(self) -> None:
+        if not hasattr(self, "run_progress_layout") or not hasattr(self, "run_panel"):
+            return
+        compact = self.run_panel.width() < 720
+        target_direction = QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
+        if self.run_progress_layout.direction() != target_direction:
+            self.run_progress_layout.setDirection(target_direction)
+        self.run_panel.setMinimumHeight(244 if compact else 166)
 
     def _connect(self) -> None:
         self.platform_list.currentRowChanged.connect(self.stack.setCurrentIndex)
@@ -502,6 +596,7 @@ class MainWindow(QWidget):
         qq_page.workers.setValue(int(shared.get("transcode_max_workers", 2) or 2))
         qq_page.cover.setChecked(bool(shared.get("embed_cover_art", False)))
         qq_page.album.setChecked(bool(shared.get("supplement_album_metadata", False)))
+        qq_page.group_by_artist.setChecked(bool(shared.get("group_by_artist", False)))
         bitrate = qq.get("transcode_bitrate_kbps", 320)
         if bitrate:
             qq_page.bitrate.setCurrentText(str(bitrate))
@@ -517,6 +612,12 @@ class MainWindow(QWidget):
             page.input_path.set_text(str(values.get("input_dir", "")))
             page.output_dir.set_text(str(values.get("output_dir", self.paths.output_dir / platform_id)))
             page.set_format_values(values)
+            page.recursive.setChecked(bool(shared.get("recursive", True)))
+            page.transcode.setChecked(bool(shared.get("transcode_enabled", True)))
+            page.workers.setValue(int(shared.get("transcode_max_workers", 2) or 2))
+            page.cover.setChecked(bool(shared.get("embed_cover_art", False)))
+            page.album.setChecked(bool(shared.get("supplement_album_metadata", False)))
+            page.group_by_artist.setChecked(bool(shared.get("group_by_artist", False)))
         kuwo_page = self.pages["kuwo"]
         kuwo_page.output_dir.set_text(str(self.paths.output_dir / "kuwo"))
 
@@ -528,6 +629,7 @@ class MainWindow(QWidget):
         self.config["shared"]["transcode_max_workers"] = page.workers.value()
         self.config["shared"]["embed_cover_art"] = page.cover.isChecked()
         self.config["shared"]["supplement_album_metadata"] = page.album.isChecked()
+        self.config["shared"]["group_by_artist"] = page.group_by_artist.isChecked()
         platform_config = self.config.setdefault(platform_id, {})
         platform_config["input_dir"] = page.input_path.text()
         platform_config["output_dir"] = page.output_dir.text()
@@ -594,6 +696,7 @@ class MainWindow(QWidget):
             transcode_max_workers=page.workers.value(),
             embed_cover_art=page.cover.isChecked(),
             supplement_album_metadata=page.album.isChecked(),
+            group_by_artist=page.group_by_artist.isChecked(),
             sample_rate_hz=page.sample_rate_value(),
             bitrate_kbps=page.bitrate_value(),
             qq_fetch_missing_ekey=page.fetch_ekey.isChecked(),
@@ -647,27 +750,120 @@ class MainWindow(QWidget):
 
     def _reset_progress(self) -> None:
         self._reset_run_counts()
+        self._reset_transcode_counts()
         self.progress.setValue(0)
-        self.progress_label.setText("进度 0 / 0")
+        self.progress_label.setText("解密 0 / 0")
         self.current_file.setText("当前文件 -")
+        self.transcode_progress.setValue(0)
+        self.transcode_progress_label.setText("转码 0 / 0")
+        self.transcode_current_file.setText("当前文件 -")
         self._render_run_counts()
+        self._render_transcode_counts()
         self.elapsed_label.setText("耗时 0.0s")
+        self.status_message.setText("准备开始")
 
     def _reset_run_counts(self) -> None:
         self._run_counts = {"success": 0, "failed": 0, "skipped": 0}
+        self._run_total = 0
+        self._decoded_inputs = set()
+
+    def _reset_transcode_counts(self) -> None:
+        self._transcode_counts = {"success": 0, "failed": 0, "waiting": 0}
+        self._transcode_total = 0
 
     def _render_run_counts(self) -> None:
         self.success_label.setText(f"成功 {self._run_counts['success']}")
         self.failed_label.setText(f"失败 {self._run_counts['failed']}")
         self.skipped_label.setText(f"跳过 {self._run_counts['skipped']}")
+        attempts = self._run_counts["success"] + self._run_counts["failed"]
+        rate = int(self._run_counts["success"] / attempts * 100) if attempts else 0
+        self.decode_rate_label.setText(f"解密成功率 {rate}%")
 
-    def _record_file_result(self, result: str) -> None:
+    def _render_transcode_counts(self) -> None:
+        self.transcode_success_label.setText(f"成功 {self._transcode_counts['success']}")
+        self.transcode_failed_label.setText(f"失败 {self._transcode_counts['failed']}")
+        self.transcode_waiting_label.setText(f"等待 {self._transcode_counts['waiting']}")
+        attempts = self._transcode_counts["success"] + self._transcode_counts["failed"]
+        rate = int(self._transcode_counts["success"] / attempts * 100) if attempts else 0
+        self.transcode_rate_label.setText(f"转码成功率 {rate}%")
+
+    def _payload_int(self, data: dict, *keys: str) -> int:
+        for key in keys:
+            value = data.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    def _payload_total(self, data: dict) -> int:
+        return self._payload_int(data, "total", "candidate_count", "total_jobs")
+
+    def _completed_count(self) -> int:
+        return self._run_counts["success"] + self._run_counts["failed"] + self._run_counts["skipped"]
+
+    def _set_run_progress(self, completed: int | None = None, total: int = 0) -> None:
+        if total > 0:
+            self._run_total = total
+        effective_total = self._run_total
+        completed_count = self._completed_count() if completed is None else max(0, int(completed))
+        if effective_total <= 0:
+            self.progress.setValue(0)
+            self.progress_label.setText(f"解密 {completed_count} / 0")
+            return
+        completed_count = min(completed_count, effective_total)
+        self.progress.setValue(int(completed_count / effective_total * 100))
+        self.progress_label.setText(f"解密 {completed_count} / {effective_total}")
+
+    def _set_transcode_progress(self, completed: int | None = None, total: int = 0) -> None:
+        if total > 0:
+            self._transcode_total = total
+        effective_total = self._transcode_total
+        completed_count = (
+            self._transcode_counts["success"] + self._transcode_counts["failed"]
+            if completed is None
+            else max(0, int(completed))
+        )
+        if effective_total <= 0:
+            self.transcode_progress.setValue(0)
+            self.transcode_progress_label.setText(f"转码 {completed_count} / 0")
+            return
+        completed_count = min(completed_count, effective_total)
+        self.transcode_progress.setValue(int(completed_count / effective_total * 100))
+        self.transcode_progress_label.setText(f"转码 {completed_count} / {effective_total}")
+
+    def _payload_input_id(self, data: dict) -> str:
+        value = str(data.get("input_path") or data.get("output_path") or "").strip()
+        return value.lower()
+
+    def _record_decrypted(self, input_id: str) -> None:
+        if input_id and input_id in self._decoded_inputs:
+            return
+        if input_id:
+            self._decoded_inputs.add(input_id)
+        self._run_counts["success"] += 1
+        self._render_run_counts()
+
+    def _record_file_result(self, result: str, input_id: str = "") -> None:
         normalized = result.strip().lower()
         if normalized == "success":
+            if input_id and input_id in self._decoded_inputs:
+                self._render_run_counts()
+                return
+            if input_id:
+                self._decoded_inputs.add(input_id)
             self._run_counts["success"] += 1
         elif normalized in {"already_decrypted", "skipped"}:
+            if input_id and input_id in self._decoded_inputs:
+                self._render_run_counts()
+                return
             self._run_counts["skipped"] += 1
         elif normalized == "failed":
+            if input_id and input_id in self._decoded_inputs:
+                self._render_run_counts()
+                return
             self._run_counts["failed"] += 1
         self._render_run_counts()
 
@@ -679,55 +875,77 @@ class MainWindow(QWidget):
 
     def _handle_run_event(self, event_name: str, payload: object) -> None:
         data = payload if isinstance(payload, dict) else {}
-        total = int(data.get("total") or data.get("candidate_count") or 0)
-        index = int(data.get("index") or 0)
+        total = self._payload_total(data)
         if event_name == "batch_started":
             self._reset_run_counts()
+            self._reset_transcode_counts()
             self._render_run_counts()
-            self.progress.setValue(0)
-            self.progress_label.setText(f"进度 0 / {total}")
+            self._render_transcode_counts()
+            self.transcode_progress.setValue(0)
+            self.transcode_progress_label.setText("转码 0 / 0")
+            self.transcode_current_file.setText("当前文件 -")
+            self._set_run_progress(0, total)
             self._append_log(f"候选文件 {total}")
             return
         if event_name == "file_started":
             self.current_file.setText(f"当前文件 {pathlib.Path(str(data.get('input_path', ''))).name}")
-            self.progress_label.setText(f"进度 {max(0, index - 1)} / {total}")
-            if total:
-                self.progress.setValue(int(max(0, index - 1) / total * 100))
+            self._set_run_progress(total=total)
             return
-        if event_name in {"file_decrypted", "batch_transcode_progress"}:
+        if event_name == "file_decrypted":
             name = pathlib.Path(str(data.get("input_path", ""))).name
             self.current_file.setText(f"当前文件 {name}")
-            if total:
-                self.progress.setValue(int(index / total * 100))
-                self.progress_label.setText(f"进度 {index} / {total}")
+            self._record_decrypted(self._payload_input_id(data))
+            self._set_run_progress(total=total)
             message = str(data.get("message") or event_name)
             self._append_log(message)
             return
         if event_name == "file_finished":
             result = str(data.get("result") or "")
-            if total:
-                self.progress.setValue(int(index / total * 100))
-                self.progress_label.setText(f"进度 {index} / {total}")
             name = pathlib.Path(str(data.get("input_path", data.get("output_path", "")))).name
             if name:
                 self.current_file.setText(f"当前文件 {name}")
-            self._record_file_result(result)
+            self._record_file_result(result, self._payload_input_id(data))
+            completed = self._payload_int(data, "completed")
+            self._set_run_progress(completed if completed else None, total)
             reason = str(data.get("reason") or result)
             self._append_log(f"{name}: {reason}")
             return
         if event_name == "batch_transcode_started":
-            self._append_log(f"统一转码 {int(data.get('pending_count') or 0)}")
+            pending = self._payload_int(data, "pending_count", "total_jobs")
+            self._transcode_total = pending
+            self._transcode_counts = {"success": 0, "failed": 0, "waiting": pending}
+            self._render_transcode_counts()
+            self._set_transcode_progress(0, pending)
+            self._append_log(f"统一转码 {pending}")
+            return
+        if event_name == "batch_transcode_progress":
+            name = pathlib.Path(str(data.get("input_path", ""))).name
+            if name:
+                self.transcode_current_file.setText(f"当前文件 {name}")
+            transcode_total = self._payload_int(data, "total_jobs", "total")
+            completed = self._payload_int(data, "completed")
+            success = self._payload_int(data, "success_count")
+            failed = self._payload_int(data, "failed_count")
+            waiting = self._payload_int(data, "queued", "waiting_count")
+            if transcode_total <= 0:
+                transcode_total = max(self._transcode_total, completed)
+            if waiting <= 0 and transcode_total > completed:
+                waiting = transcode_total - completed
+            self._transcode_counts = {"success": success, "failed": failed, "waiting": max(0, waiting)}
+            self._render_transcode_counts()
+            self._set_transcode_progress(completed, transcode_total)
+            self._append_log(str(data.get("message") or event_name))
             return
         if event_name == "batch_finished":
-            self.progress.setValue(100)
-            count = int(data.get("candidate_count") or 0)
-            self.progress_label.setText(f"进度 {count} / {count}")
-            self._run_counts = {
-                "success": int(data.get("success_count") or 0),
-                "failed": int(data.get("failed_count") or 0),
-                "skipped": int(data.get("skipped_count") or 0),
-            }
+            if self._completed_count() <= 0 and not self._decoded_inputs:
+                self._run_counts = {
+                    "success": int(data.get("success_count") or 0),
+                    "failed": int(data.get("failed_count") or 0),
+                    "skipped": int(data.get("skipped_count") or 0),
+                }
             self._render_run_counts()
+            completed = self._payload_int(data, "completed") or self._completed_count()
+            self._set_run_progress(completed, total)
             hotspot = data.get("timing_hotspot_stage") or {}
             if isinstance(hotspot, dict) and hotspot.get("stage"):
                 self._append_log(f"耗时热点 {hotspot.get('stage')} {_format_seconds(float(hotspot.get('total_sec') or 0.0))}")
@@ -750,9 +968,7 @@ class MainWindow(QWidget):
         text = str(message or "").strip()
         if not text:
             return
-        self.log_view.appendPlainText(text)
-        scrollbar = self.log_view.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        self.status_message.setText(text)
 
 
 def build_stylesheet() -> str:
@@ -761,17 +977,21 @@ def build_stylesheet() -> str:
     QWidget#RootWindow {{ background: {APP_BG}; }}
     QFrame#Sidebar, QFrame#Panel {{ background: {PANEL_BG}; border: 1px solid {BORDER}; border-radius: 8px; }}
     QFrame#SoftPanel {{ background: {PANEL_ALT}; border: 1px solid {BORDER}; border-radius: 8px; }}
+    QFrame#StatusBlock {{ background: transparent; border: 0; }}
     QStackedWidget#Stack, QScrollArea#FormScroll {{ background: transparent; border: 0; }}
     QLabel, QCheckBox {{ background: transparent; }}
     QLabel#Brand {{ font-size: 22px; font-weight: 700; color: {GREEN_DARK}; padding: 6px 6px; }}
     QLabel#PageTitle {{ font-size: 21px; font-weight: 700; }}
     QLabel#Muted, QLabel#FieldLabel {{ color: {MUTED}; }}
+    QLabel#StatusMessage {{ color: {MUTED}; }}
+    QLabel#DecryptProgressLabel, QLabel#TranscodeProgressLabel {{ color: {TEXT}; font-weight: 700; }}
     QLabel#AppVersion {{ color: {MUTED}; padding: 6px 4px; }}
     QLabel#StatusOk {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; border: 1px solid {GREEN}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
     QLabel#StatusOff {{ background: {RED_SOFT}; color: {RED_DARK}; border: 1px solid {RED}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
     QLabel#Stat {{ background: {GREEN_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {GREEN_DARK}; font-weight: 600; }}
-    QLineEdit#Input, QComboBox#Combo, QSpinBox#Spin {{ background: white; border: 1px solid {BORDER}; border-radius: 7px; padding: 5px 8px; min-height: 22px; }}
-    QLineEdit#Input:focus, QComboBox#Combo:focus, QSpinBox#Spin:focus {{ border: 1px solid {GREEN}; }}
+    QLabel#DecodeSuccessRate, QLabel#TranscodeSuccessRate {{ background: {RED_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {RED_DARK}; font-weight: 600; }}
+    QLineEdit#Input, QComboBox#Combo, QSpinBox#Spin, QSpinBox#TranscodeWorkers {{ background: white; border: 1px solid {BORDER}; border-radius: 7px; padding: 5px 8px; min-height: 22px; }}
+    QLineEdit#Input:focus, QComboBox#Combo:focus, QSpinBox#Spin:focus, QSpinBox#TranscodeWorkers:focus {{ border: 1px solid {GREEN}; }}
     QPushButton {{ border: 0; border-radius: 8px; padding: 7px 14px; background: {GREEN_SOFT}; color: {GREEN_DARK}; font-weight: 600; }}
     QPushButton#PrimaryButton {{ background: {GREEN}; color: white; min-width: 112px; }}
     QPushButton#PrimaryButton:hover {{ background: {GREEN_DARK}; }}
@@ -785,9 +1005,9 @@ def build_stylesheet() -> str:
     QListWidget#PlatformList::item {{ padding: 12px 10px; border-radius: 8px; margin: 2px 0; }}
     QListWidget#PlatformList::item:selected {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; }}
     QListWidget#PlatformList::item:hover {{ background: {RED_SOFT}; }}
-    QProgressBar#Progress {{ background: #EEF0F2; border: 0; border-radius: 6px; height: 12px; }}
-    QProgressBar#Progress::chunk {{ background: {GREEN}; border-radius: 6px; }}
-    QPlainTextEdit#Log {{ background: #101828; color: #E6F2EB; border: 1px solid #1D2939; border-radius: 8px; padding: 8px; font-family: Consolas, Microsoft YaHei UI; }}
+    QProgressBar#DecryptProgress, QProgressBar#TranscodeProgress {{ background: #EEF0F2; border: 0; border-radius: 6px; height: 12px; }}
+    QProgressBar#DecryptProgress::chunk {{ background: {GREEN}; border-radius: 6px; }}
+    QProgressBar#TranscodeProgress::chunk {{ background: {RED}; border-radius: 6px; }}
     """
 
 

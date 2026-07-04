@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import tempfile
 import unittest
+import json
 
 from src.Infrastructure.config_repository import load_config
 from src.Infrastructure.runtime_paths import RuntimePaths
@@ -43,6 +44,28 @@ class ConfigRepositoryTests(unittest.TestCase):
             self.assertFalse(config["kuwo"]["auto_transcode_after_decode"])
             self.assertIsNone(config["kuwo"]["transcode_sample_rate_hz"])
             self.assertIsNone(config["kuwo"]["transcode_bitrate_kbps"])
+
+    def test_config_preserves_user_defined_transcode_parallelism(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            paths.plugins_config.parent.mkdir(parents=True, exist_ok=True)
+            paths.plugins_config.write_text(
+                json.dumps(
+                    {
+                        "decrypt_cli": {
+                            "shared": {"transcode_max_workers": 12},
+                            "transcode_batch": {"max_workers": 9},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            _, config = load_config(paths)
+
+            self.assertEqual(config["shared"]["transcode_max_workers"], 12)
+            self.assertEqual(config["transcode_batch"]["max_workers"], 9)
 
 
 if __name__ == "__main__":
