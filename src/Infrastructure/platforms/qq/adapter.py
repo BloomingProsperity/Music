@@ -2,17 +2,10 @@
 
 import logging
 import pathlib
-import shutil
 import time
 from dataclasses import dataclass, field
 
-from src.Infrastructure.process_utils import find_process_by_name, find_process_by_substring
 from src.Infrastructure.transcoder import detect_audio_container
-from src.Infrastructure.platforms.qq.decrypt_artifact import (
-    QQArtifactState,
-    inspect_decrypt_artifact,
-    qq_artifact_failure_reason,
-)
 
 
 SUPPORTED_SUFFIXES = {'.mflac', '.mgg', '.mmp4'}
@@ -22,31 +15,11 @@ WHITELIST = {'flac', 'm4a', 'mp3', 'wav'}
 logger = logging.getLogger('qkkdecrypt.infrastructure.platforms.qq')
 
 
-def _settings_bool(settings: dict, key: str, default: bool) -> bool:
-    value = settings.get(key, default)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-    return bool(value)
-
-
 @dataclass(slots=True)
 class QQPlatformAdapter:
     platform_id: str = 'qq'
     display_name: str = 'QQ音乐'
-    _gateway: FridaDecryptGateway | None = field(default=None, init=False, repr=False)
-    _variant_adapter: QQVariantAdapterService | None = field(default=None, init=False, repr=False)
     _offline_decryptor: QQOfflineMusicExDecryptor | None = field(default=None, init=False, repr=False)
-
-    def _load_runtime(self):
-        from src.Infrastructure.platforms.qq.runtime.frida_decrypt_gateway import FridaDecryptGateway
-        from src.Infrastructure.platforms.qq.runtime.qqmusic_decrypt import pick_safe_tmp_dir
-        return FridaDecryptGateway, pick_safe_tmp_dir
-
-    def _ensure_variant_adapter(self) -> QQVariantAdapterService:
-        if self._variant_adapter is None:
-            from src.Infrastructure.platforms.qq.variant_adapter import QQVariantAdapterService
-            self._variant_adapter = QQVariantAdapterService()
-        return self._variant_adapter
 
     def _ensure_offline_decryptor(self) -> QQOfflineMusicExDecryptor:
         if self._offline_decryptor is None:
@@ -54,32 +27,11 @@ class QQPlatformAdapter:
             self._offline_decryptor = QQOfflineMusicExDecryptor()
         return self._offline_decryptor
 
-    @staticmethod
-    def _notify_variant_started(settings: dict, *, input_path: pathlib.Path, message: str, mode: str, label: str) -> None:
-        notifier = settings.get('qq_variant_notifier')
-        if not callable(notifier):
-            return
-        try:
-            notifier({
-                'input_path': str(input_path),
-                'variant_mode': mode,
-                'variant_label': label,
-                'message': message,
-            })
-        except Exception:
-            pass
-
     def requires_running_process(self) -> bool:
         return False
 
     def validate_runtime(self, settings: dict) -> tuple[bool, str | None]:
-        if not _settings_bool(settings, 'qq_legacy_frida_enabled', False):
-            return True, None
-        process_match = str(settings.get('process_match', 'qqmusic') or 'qqmusic')
-        info = find_process_by_name('QQMusic.exe')
-        if info is None:
-            info = find_process_by_substring(process_match)
-        return (info is not None, None if info is not None else '未检测到 QQ 音乐进程')
+        return True, None
 
     def collect_files(self, input_path: pathlib.Path, recursive: bool) -> list[pathlib.Path]:
         if input_path.is_file():
@@ -108,125 +60,35 @@ class QQPlatformAdapter:
     def desired_target_format(self, input_path: pathlib.Path, settings: dict) -> str:
         return self.predicted_extension(input_path, settings) or 'auto'
 
-    @staticmethod
-    def _cleanup_paths(*paths: pathlib.Path) -> None:
-        for path in paths:
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("failed to cleanup QQ temporary file: %s", path)
-
-    @staticmethod
-    def _publish_safe_output(safe_output: pathlib.Path, final_work_path: pathlib.Path) -> None:
-        final_work_path.parent.mkdir(parents=True, exist_ok=True)
-        if final_work_path.exists():
-            final_work_path.unlink()
-        shutil.move(str(safe_output), str(final_work_path))
-
-    def _validate_decrypt_artifact(self, input_path: pathlib.Path, final_work_path: pathlib.Path) -> QQArtifactState:
-        state = inspect_decrypt_artifact(input_path, final_work_path)
-        if state != QQArtifactState.DECODED:
-            self._cleanup_paths(final_work_path)
-            raise RuntimeError(qq_artifact_failure_reason(state))
-        return state
-
     def decrypt_one(self, input_path: pathlib.Path, work_dir: pathlib.Path, settings: dict, *, log_dir: pathlib.Path) -> dict:
         started = time.perf_counter()
         source_suffix = input_path.suffix.lower().lstrip('.')
         default_ext = RAW_CONTAINER_RULES.get(source_suffix, 'flac')
         final_work_path = work_dir / f"{input_path.stem}.{default_ext}"
 
-        if settings.get('qq_offline_musicex_enabled', True) is not False:
-            offline_detail = self._ensure_offline_decryptor().decrypt_to_file(
-                input_path,
-                final_work_path,
-                settings,
-                log_dir=log_dir,
-            )
-            if offline_detail is not None:
-                elapsed = round(time.perf_counter() - started, 6)
-                offline_detail.setdefault('output_path', str(final_work_path))
-                offline_detail.setdefault('detected_container', detect_audio_container(final_work_path)[0])
-                offline_detail.setdefault('final_extension', offline_detail.get('detected_container', default_ext))
-                offline_detail.setdefault('recognition_stage', 'offline_qmc2')
-                offline_detail.setdefault('decoded_bytes', final_work_path.stat().st_size)
-                offline_detail['timing'] = {
-                    'header_parse_sec': 0.0,
-                    'key_material_sec': 0.0,
-                    'stream_decode_sec': elapsed,
-                    'publish_sec': 0.0,
-                    'total_sec': elapsed,
-                }
-                return offline_detail
-
-        if not _settings_bool(settings, 'qq_legacy_frida_enabled', False):
+        offline_detail = self._ensure_offline_decryptor().decrypt_to_file(
+            input_path,
+            final_work_path,
+            settings,
+            log_dir=log_dir,
+        )
+        if offline_detail is None:
             raise RuntimeError(
                 'qq_local_ekey_missing: QQ 本地解码缺少可用 ekey；'
                 '请先缓存该文件 ekey，或临时打开 QQ 音乐补取 key 后重试'
             )
 
-        FridaDecryptGateway, pick_safe_tmp_dir = self._load_runtime()
-        if self._gateway is None:
-            self._gateway = FridaDecryptGateway()
-
-        safe_tmp_root = pathlib.Path(pick_safe_tmp_dir(str(work_dir))).resolve()
-        safe_tmp_root.mkdir(parents=True, exist_ok=True)
-        safe_source = safe_tmp_root / f"qqsrc_{time.time_ns()}{input_path.suffix.lower()}"
-        safe_output = safe_tmp_root / f"qq_{time.time_ns()}.{default_ext}"
-        backend = 'frida:qqmusic'
-        variant_mode = 'not_used'
-        decrypt_exception: Exception | None = None
-
-        try:
-            variant_result = self._ensure_variant_adapter().prepare_legacy_compatible_input(str(input_path), str(safe_tmp_root))
-            safe_source = pathlib.Path(variant_result.staged_path)
-            variant_mode = variant_result.mode
-            self._notify_variant_started(
-                settings,
-                input_path=input_path,
-                message=variant_result.message,
-                mode=variant_result.mode,
-                label=variant_result.label,
-            )
-            ok = self._gateway.decrypt_file(str(safe_source), str(safe_output))
-        except Exception as exc:  # pragma: no cover - runtime-specific failure
-            decrypt_exception = exc
-            ok = False
-
-        if ok and safe_output.exists() and safe_output.stat().st_size > 1024:
-            self._cleanup_paths(safe_source)
-            self._publish_safe_output(safe_output, final_work_path)
-        else:
-            self._cleanup_paths(safe_source, safe_output)
-            reason = (
-                f"qq_decrypt_failed: {decrypt_exception}"
-                if decrypt_exception is not None
-                else 'qq_decrypt_failed: QQ 旧链解密失败'
-            )
-            raise RuntimeError(reason)
-
-        artifact_state = self._validate_decrypt_artifact(input_path, final_work_path)
-        detected_container, recognition_stage = detect_audio_container(final_work_path)
-        if detected_container == 'bin':
-            raise RuntimeError(f'unrecognized_audio_container: stage={recognition_stage}')
-
         elapsed = round(time.perf_counter() - started, 6)
-        return {
-            'output_path': str(final_work_path),
-            'detected_container': detected_container,
-            'final_extension': detected_container,
-            'recognition_stage': recognition_stage,
-            'backend': backend,
-            'decoded_bytes': final_work_path.stat().st_size,
-            'artifact_state': artifact_state.value,
-            'variant_mode': variant_mode,
-            'variant_source_input': str(input_path),
-            'variant_staged_input': str(safe_source),
-            'timing': {
-                'header_parse_sec': 0.0,
-                'key_material_sec': 0.0,
-                'stream_decode_sec': elapsed,
-                'publish_sec': 0.0,
-                'total_sec': elapsed,
-            },
+        offline_detail.setdefault('output_path', str(final_work_path))
+        offline_detail.setdefault('detected_container', detect_audio_container(final_work_path)[0])
+        offline_detail.setdefault('final_extension', offline_detail.get('detected_container', default_ext))
+        offline_detail.setdefault('recognition_stage', 'offline_qmc2')
+        offline_detail.setdefault('decoded_bytes', final_work_path.stat().st_size)
+        offline_detail['timing'] = {
+            'header_parse_sec': 0.0,
+            'key_material_sec': 0.0,
+            'stream_decode_sec': elapsed,
+            'publish_sec': 0.0,
+            'total_sec': elapsed,
         }
+        return offline_detail

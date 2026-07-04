@@ -402,7 +402,7 @@ class QQMusicExOfflineTests(unittest.TestCase):
         self.assertEqual(FakeKernel32.ReadProcessMemory.restype, musicex_offline.ctypes.wintypes.BOOL)
         self.assertEqual(FakePsapi.EnumProcesses.restype, musicex_offline.ctypes.wintypes.BOOL)
 
-    def test_adapter_uses_offline_musicex_decrypt_before_frida_gateway(self) -> None:
+    def test_adapter_uses_offline_musicex_decrypt(self) -> None:
         class OfflineDecryptor:
             def __init__(self) -> None:
                 self.calls: list[pathlib.Path] = []
@@ -426,18 +426,10 @@ class QQMusicExOfflineTests(unittest.TestCase):
                     "decoded_bytes": output_path.stat().st_size,
                 }
 
-        class FailingGateway:
-            def decrypt_file(self, _src_file: str, _dst_file: str) -> bool:
-                raise AssertionError("frida gateway should not run for musicex offline decrypt")
-
         class TestAdapter(QQPlatformAdapter):
-            def __init__(self, offline: OfflineDecryptor, safe_dir: pathlib.Path) -> None:
+            def __init__(self, offline: OfflineDecryptor) -> None:
                 super().__init__()
                 self.offline = offline
-                self.safe_dir = safe_dir
-
-            def _load_runtime(self):
-                return lambda: FailingGateway(), lambda _work_dir: str(self.safe_dir)
 
             def _ensure_offline_decryptor(self):
                 return self.offline
@@ -448,7 +440,7 @@ class QQMusicExOfflineTests(unittest.TestCase):
             work_dir = root / "work"
             source.write_bytes(_musicex_fixture())
             offline = OfflineDecryptor()
-            adapter = TestAdapter(offline, root / "safe")
+            adapter = TestAdapter(offline)
 
             detail = adapter.decrypt_one(source, work_dir, {}, log_dir=root)
 
@@ -460,26 +452,10 @@ class QQMusicExOfflineTests(unittest.TestCase):
     def test_adapter_defaults_to_local_mode_without_qqmusic_process(self) -> None:
         adapter = QQPlatformAdapter()
 
-        with (
-            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_name", return_value=None),
-            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_substring", return_value=None),
-        ):
-            self.assertFalse(adapter.requires_running_process())
-            self.assertEqual(adapter.validate_runtime({}), (True, None))
+        self.assertFalse(adapter.requires_running_process())
+        self.assertEqual(adapter.validate_runtime({}), (True, None))
 
-    def test_adapter_checks_qqmusic_process_only_when_legacy_frida_is_enabled(self) -> None:
-        adapter = QQPlatformAdapter()
-
-        with (
-            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_name", return_value=None),
-            mock.patch("src.Infrastructure.platforms.qq.adapter.find_process_by_substring", return_value=None),
-        ):
-            ok, reason = adapter.validate_runtime({"qq_legacy_frida_enabled": True})
-
-        self.assertFalse(ok)
-        self.assertEqual(reason, "未检测到 QQ 音乐进程")
-
-    def test_adapter_does_not_fallback_to_frida_when_local_key_is_missing_by_default(self) -> None:
+    def test_adapter_raises_when_local_key_is_missing(self) -> None:
         class OfflineDecryptor:
             def decrypt_to_file(
                 self,
@@ -494,9 +470,6 @@ class QQMusicExOfflineTests(unittest.TestCase):
         class TestAdapter(QQPlatformAdapter):
             def _ensure_offline_decryptor(self):
                 return OfflineDecryptor()
-
-            def _load_runtime(self):
-                raise AssertionError("frida gateway should stay disabled unless qq_legacy_frida_enabled is true")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)
