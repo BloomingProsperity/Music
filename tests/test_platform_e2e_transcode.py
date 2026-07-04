@@ -17,6 +17,8 @@ from Crypto.Util.Padding import pad
 
 from src.Application.decrypt_service import run_batch
 from src.Application.models import BatchRunConfig
+from src.Infrastructure.platforms.qq import musicex_offline
+from src.Infrastructure.platforms.qq.adapter import QQPlatformAdapter
 from src.Infrastructure.platforms.kuwo.adapter import KuwoPlatformAdapter
 from src.Infrastructure.platforms.kugou.adapter import KugouPlatformAdapter
 from src.Infrastructure.platforms.netease.adapter import NeteasePlatformAdapter
@@ -108,6 +110,53 @@ def _write_kwm_fixture(path: pathlib.Path, payload: bytes) -> None:
     swapped_key = key[16:32] + key[:16]
     prepared[key_probe_offset:key_probe_offset + 32] = bytes(a ^ b for a, b in zip(swapped_key, key))
     path.write_bytes(b"\0" * 1024 + _xor_kwm(bytes(prepared), key))
+
+
+def _tea_encrypt_block(block: bytes, key: bytes) -> bytes:
+    v0, v1 = struct.unpack(">II", block)
+    k0, k1, k2, k3 = struct.unpack(">4I", key)
+    delta = 0x9E3779B9
+    total = 0
+    for _ in range(16):
+        total = (total + delta) & 0xFFFFFFFF
+        v0 = (v0 + (((v1 << 4) + k0) ^ (v1 + total) ^ ((v1 >> 5) + k1))) & 0xFFFFFFFF
+        v1 = (v1 + (((v0 << 4) + k2) ^ (v0 + total) ^ ((v0 >> 5) + k3))) & 0xFFFFFFFF
+    return struct.pack(">II", v0, v1)
+
+
+def _encrypt_tencent_tea(data: bytes, key: bytes) -> bytes:
+    pad_len = (8 - ((1 + 2 + len(data) + 7) % 8)) % 8
+    plain = bytes([pad_len]) + bytes((0xA5 + index) & 0xFF for index in range(pad_len)) + b"\0\0" + data + b"\0" * 7
+    blocks = [plain[index:index + 8] for index in range(0, len(plain), 8)]
+    encrypted_blocks: list[bytes] = []
+    previous_cipher = bytes(8)
+    previous_decoded = bytes(8)
+    for block in blocks:
+        decoded = bytes(value ^ mask for value, mask in zip(block, previous_cipher))
+        mixed = _tea_encrypt_block(decoded, key)
+        encrypted = bytes(value ^ mask for value, mask in zip(mixed, previous_decoded))
+        encrypted_blocks.append(encrypted)
+        previous_cipher = encrypted
+        previous_decoded = decoded
+    return b"".join(encrypted_blocks)
+
+
+def _qq_raw_key_for_final_key(final_key: bytes) -> bytes:
+    simple_key = musicex_offline._simple_make_key(106, 8)
+    tea_key = bytearray(16)
+    for index in range(8):
+        tea_key[index * 2] = simple_key[index]
+        tea_key[index * 2 + 1] = final_key[index]
+    return final_key[:8] + _encrypt_tencent_tea(final_key[8:], bytes(tea_key))
+
+
+def _write_qq_mflac_fixture(path: pathlib.Path, payload: bytes) -> None:
+    final_key = b"qkk-local-key-16"
+    ekey = base64.b64encode(_qq_raw_key_for_final_key(final_key)).decode("ascii")
+    encrypted = bytearray(payload)
+    musicex_offline._make_cipher(final_key).decrypt(encrypted, 0)
+    ekey_data = f"001localqq,{ekey}".encode("ascii")
+    path.write_bytes(bytes(encrypted) + ekey_data + len(ekey_data).to_bytes(4, "little") + b"QTag")
 
 
 def _encrypt_kugou_v3_payload(payload: bytes, own_key: bytes, pub_key: bytes) -> bytes:
@@ -219,6 +268,26 @@ def test_netease_batch_decrypts_and_transcodes_synthetic_ncm_to_decodable_mp3(tm
         NeteasePlatformAdapter(),
         source,
         {"target_format_ncm": "mp3"},
+    )
+
+    _assert_decodable_mp3(mp3_path, ffmpeg_path)
+
+
+def test_qq_batch_decrypts_and_transcodes_synthetic_mflac_to_decodable_mp3(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ffmpeg_path = resolve_ffmpeg_path(RuntimePaths.discover())
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg executable is not available")
+    source = tmp_path / "local_e2e.mflac"
+    _write_qq_mflac_fixture(source, _wav_payload())
+    monkeypatch.setattr(musicex_offline, "decrypt_qmc2_buffer_fast", lambda _key, _buffer, _offset: False)
+
+    mp3_path = _run_batch_to_mp3(
+        tmp_path,
+        monkeypatch,
+        "qq",
+        QQPlatformAdapter(),
+        source,
+        {"format_rules": {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"}},
     )
 
     _assert_decodable_mp3(mp3_path, ffmpeg_path)
