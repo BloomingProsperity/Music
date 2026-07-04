@@ -364,6 +364,188 @@ class TranscodeChoiceTests(unittest.TestCase):
             self.assertFalse(source.exists())
             self.assertTrue((output_dir / "one.flac").exists())
 
+    def test_run_batch_skips_existing_verified_transcoded_output_before_decrypting(self) -> None:
+        class FakeAdapter:
+            platform_id = "qq"
+            display_name = "QQ音乐"
+
+            def __init__(self) -> None:
+                self.decrypt_calls = 0
+
+            def collect_files(self, input_path: pathlib.Path, recursive: bool) -> list[pathlib.Path]:
+                return sorted(input_path.glob("*.mflac"))
+
+            def output_basename(self, input_path: pathlib.Path) -> str:
+                return input_path.stem
+
+            def predicted_extension(self, input_path: pathlib.Path, settings: dict) -> str | None:
+                return "mp3"
+
+            def desired_target_format(self, input_path: pathlib.Path, settings: dict) -> str:
+                return "mp3"
+
+            def decrypt_one(self, input_path: pathlib.Path, work_dir: pathlib.Path, settings: dict, *, log_dir: pathlib.Path) -> dict:
+                self.decrypt_calls += 1
+                raise AssertionError("existing verified output should skip decrypt_one")
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            input_dir = root / "in"
+            output_dir = root / "out"
+            input_dir.mkdir()
+            output_dir.mkdir()
+            source = input_dir / "one.mflac"
+            source.write_bytes(b"encrypted")
+            existing_output = output_dir / "one.mp3"
+            existing_output.write_bytes(b"ID3" + b"\0" * 2048)
+            paths = RuntimePaths(
+                root_dir=root,
+                bundle_dir=root,
+                assets_dir=root / "assets",
+                plugins_dir=root / "plugins",
+                log_dir=root / "_log",
+                output_dir=root / "output",
+                docs_dir=root / "_docs",
+                plugins_config=root / "plugins" / "plugins.json",
+                output_manifest=root / "plugins" / "output_manifest.json",
+            )
+            adapter = FakeAdapter()
+            events: list[tuple[str, dict]] = []
+            config = BatchRunConfig(
+                platform_id="qq",
+                input_path=input_dir,
+                output_dir=output_dir,
+                recursive=False,
+                collision_policy="suffix",
+                settings={
+                    "transcode_enabled": True,
+                    "auto_transcode_after_decode": True,
+                    "embed_cover_art": False,
+                    "delete_source_after_success": True,
+                },
+                event_sink=lambda event_name, payload: events.append((event_name, payload)),
+            )
+
+            with (
+                mock.patch.object(decrypt_service.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(
+                    decrypt_service,
+                    "probe_media_summary",
+                    return_value={
+                        "container": "mp3",
+                        "audio_streams": 1,
+                        "video_streams": 0,
+                        "cover": False,
+                        "metadata": {},
+                    },
+                ),
+                mock.patch.object(decrypt_service, "probe_audio_container", return_value="mp3"),
+            ):
+                result_code = decrypt_service.run_batch(config, adapter)
+
+            finished = [payload for event_name, payload in events if event_name == "file_finished"]
+            source_exists_after_run = source.exists()
+
+        self.assertEqual(result_code, 0)
+        self.assertEqual(adapter.decrypt_calls, 0)
+        self.assertTrue(source_exists_after_run)
+        self.assertEqual(len(finished), 1)
+        self.assertEqual(finished[0]["result"], "already_decrypted")
+        self.assertEqual(pathlib.Path(finished[0]["output_path"]), existing_output)
+
+    def test_run_batch_reprocesses_existing_output_when_probe_fails(self) -> None:
+        class FakeAdapter:
+            platform_id = "qq"
+            display_name = "QQ音乐"
+
+            def __init__(self) -> None:
+                self.decrypt_calls = 0
+
+            def collect_files(self, input_path: pathlib.Path, recursive: bool) -> list[pathlib.Path]:
+                return sorted(input_path.glob("*.mflac"))
+
+            def output_basename(self, input_path: pathlib.Path) -> str:
+                return input_path.stem
+
+            def predicted_extension(self, input_path: pathlib.Path, settings: dict) -> str | None:
+                return "mp3"
+
+            def desired_target_format(self, input_path: pathlib.Path, settings: dict) -> str:
+                return "mp3"
+
+            def decrypt_one(self, input_path: pathlib.Path, work_dir: pathlib.Path, settings: dict, *, log_dir: pathlib.Path) -> dict:
+                self.decrypt_calls += 1
+                output_path = work_dir / f"{input_path.stem}.flac"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"fLaC" + b"\0" * 2048)
+                return {
+                    "output_path": str(output_path),
+                    "detected_container": "flac",
+                    "final_extension": "flac",
+                    "recognition_stage": "test",
+                    "backend": "test",
+                    "decoded_bytes": output_path.stat().st_size,
+                    "timing": {"stream_decode_sec": 0.001, "total_sec": 0.001},
+                }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            input_dir = root / "in"
+            output_dir = root / "out"
+            input_dir.mkdir()
+            output_dir.mkdir()
+            (input_dir / "one.mflac").write_bytes(b"encrypted")
+            existing_output = output_dir / "one.mp3"
+            existing_output.write_bytes(b"not-a-playable-mp3")
+            paths = RuntimePaths(
+                root_dir=root,
+                bundle_dir=root,
+                assets_dir=root / "assets",
+                plugins_dir=root / "plugins",
+                log_dir=root / "_log",
+                output_dir=root / "output",
+                docs_dir=root / "_docs",
+                plugins_config=root / "plugins" / "plugins.json",
+                output_manifest=root / "plugins" / "output_manifest.json",
+            )
+            adapter = FakeAdapter()
+            config = BatchRunConfig(
+                platform_id="qq",
+                input_path=input_dir,
+                output_dir=output_dir,
+                recursive=False,
+                collision_policy="suffix",
+                settings={
+                    "transcode_enabled": True,
+                    "auto_transcode_after_decode": True,
+                    "transcode_max_workers": 1,
+                    "embed_cover_art": False,
+                },
+            )
+
+            def fake_probe(path: pathlib.Path) -> dict:
+                if path == existing_output:
+                    return {"container": "bin", "audio_streams": 0, "video_streams": 0, "cover": False, "metadata": {}}
+                return {"container": "mp3", "audio_streams": 1, "video_streams": 0, "cover": False, "metadata": {}}
+
+            def fake_transcode(input_path: pathlib.Path, output_path: pathlib.Path, target_format: str, **_kwargs):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"ID3" + input_path.name.encode("utf-8"))
+                return {"output_path": str(output_path), "return_code": 0}
+
+            with (
+                mock.patch.object(decrypt_service.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(decrypt_service, "probe_media_summary", side_effect=fake_probe),
+                mock.patch.object(decrypt_service, "transcode_file", side_effect=fake_transcode),
+            ):
+                result_code = decrypt_service.run_batch(config, adapter)
+
+            output_bytes = existing_output.read_bytes()
+
+        self.assertEqual(result_code, 0)
+        self.assertEqual(adapter.decrypt_calls, 1)
+        self.assertTrue(output_bytes.startswith(b"ID3"))
+
     def test_run_batch_starts_transcoding_after_pipeline_threshold(self) -> None:
         class FakeAdapter:
             platform_id = "qq"

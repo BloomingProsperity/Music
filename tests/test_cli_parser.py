@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import pathlib
 import tempfile
 import unittest
@@ -272,6 +273,55 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(verify.call_args.kwargs["output_dir"], pathlib.Path(root / "out"))
         self.assertEqual(verify.call_args.kwargs["platforms"], ("netease",))
         write_reports.assert_called_once_with(summary, pathlib.Path(root / "out"))
+
+    def test_sample_verify_cli_reports_partial_missing_samples_distinctly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            config = {"shared": {}, "qq": {}, "kugou": {}, "netease": {}, "kuwo": {}}
+            verified = mock.Mock(
+                platform_id="netease",
+                status="verified",
+                input_path=root,
+                verified_outputs=[root / "out" / "song.mp3"],
+            )
+            missing = mock.Mock(
+                platform_id="kugou",
+                status="not_found",
+                input_path=root,
+                verified_outputs=[],
+            )
+            summary = mock.Mock(exit_code=3, results=[verified, missing], total_candidates=1, verified_count=1, failed_count=0)
+
+            with (
+                mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(cli, "load_config", return_value=({}, config)),
+                mock.patch.object(cli, "run_sample_verification", return_value=summary),
+                mock.patch.object(
+                    cli,
+                    "write_sample_verification_reports",
+                    return_value=(root / "out" / "sample_verify_report.json", root / "out" / "sample_verify_report.txt"),
+                ),
+                mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            ):
+                result = cli.main(
+                    [
+                        "sample-verify",
+                        "--input",
+                        str(root),
+                        "--output",
+                        str(root / "out"),
+                        "--platform",
+                        "all",
+                    ]
+                )
+
+        self.assertEqual(result, 3)
+        output = stdout.getvalue()
+        self.assertIn("网易云音乐: 验证通过 1 个输出", output)
+        self.assertIn("酷狗音乐: 未发现样本", output)
+        self.assertIn("部分平台未发现样本，不能视为全部平台真实样本验证完成。", output)
+        self.assertNotIn("未找到可验证样本，不能视为平台真实样本验证完成。", output)
 
 
 if __name__ == "__main__":

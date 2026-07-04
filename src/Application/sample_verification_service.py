@@ -183,7 +183,7 @@ def _output_paths_from_events(events: list[tuple[str, dict[str, Any]]]) -> list[
         if event_name != "file_finished":
             continue
         result = str(payload.get("result") or "")
-        if result != "success":
+        if result not in {"success", "already_decrypted"}:
             continue
         output_path = str(payload.get("output_path") or "").strip()
         if output_path:

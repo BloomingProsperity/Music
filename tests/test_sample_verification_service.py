@@ -118,7 +118,7 @@ def test_sample_verification_runs_batch_and_strict_decodes_outputs(tmp_path: pat
     assert summary.results[0].verified_outputs == [output]
 
 
-def test_sample_verification_does_not_accept_already_decrypted_outputs(tmp_path: pathlib.Path, monkeypatch) -> None:
+def test_sample_verification_strict_decodes_reused_outputs(tmp_path: pathlib.Path, monkeypatch) -> None:
     source = tmp_path / "song.ncm"
     source.write_bytes(b"encrypted")
     output = tmp_path / "out" / "netease" / "song.mp3"
@@ -146,10 +146,10 @@ def test_sample_verification_does_not_accept_already_decrypted_outputs(tmp_path:
         platforms=("netease",),
     )
 
-    assert summary.exit_code == 2
-    assert summary.verified_count == 0
-    assert summary.results[0].status == "failed"
-    assert "no verified outputs" in summary.results[0].reason
+    assert summary.exit_code == 0
+    assert summary.verified_count == 1
+    assert summary.results[0].status == "verified"
+    assert summary.results[0].verified_outputs == [output]
 
 
 def test_sample_verification_fails_when_strict_decode_rejects_output(tmp_path: pathlib.Path, monkeypatch) -> None:

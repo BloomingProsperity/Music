@@ -225,7 +225,10 @@ def _run_sample_verify_cli(paths: RuntimePaths, config: dict[str, Any], args: ar
     print(f"验证报告：{json_report}")
     print(f"文本报告：{text_report}")
     if summary.exit_code == 3:
-        print("未找到可验证样本，不能视为平台真实样本验证完成。")
+        if summary.verified_count > 0 and any(item.status == "not_found" for item in summary.results):
+            print("部分平台未发现样本，不能视为全部平台真实样本验证完成。")
+        else:
+            print("未找到可验证样本，不能视为平台真实样本验证完成。")
     return summary.exit_code
 
 

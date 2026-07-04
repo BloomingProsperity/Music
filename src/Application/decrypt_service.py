@@ -17,6 +17,7 @@ from src.Infrastructure.runtime_logging import setup_logger, timing_text, write_
 from src.Infrastructure.runtime_paths import RuntimePaths
 from src.Infrastructure.transcoder import (
     normalize_target_format,
+    probe_audio_container,
     probe_media_summary,
     summary_to_log,
     transcode_file,
@@ -693,6 +694,45 @@ def _artifact_needs_transcode(desired_target: str, detected_container: str) -> b
     return not (target_format == "auto" or detected_container == "bin" or target_format == detected_container)
 
 
+def _predecode_completed_extension(
+    *,
+    predicted_ext: str | None,
+    desired_target: str,
+    transcode_enabled: bool,
+) -> str | None:
+    if transcode_enabled:
+        target = normalize_target_format(desired_target)
+        if target != "auto":
+            return "m4a" if target == "ogg" else target
+    if not predicted_ext:
+        return None
+    normalized = str(predicted_ext or "").strip().lower().lstrip(".")
+    if normalized == "ogg":
+        normalized = "m4a"
+    return normalized if normalized in {"flac", "m4a", "mp3", "wav"} else None
+
+
+def _existing_completed_output_is_usable(path: pathlib.Path, expected_extension: str) -> bool:
+    if not path.exists() or not path.is_file():
+        return False
+    try:
+        if path.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+    summary = probe_media_summary(path)
+    container = str(summary.get("container") or "bin").strip().lower()
+    audio_streams = int(summary.get("audio_streams", 0) or 0)
+    if container != expected_extension or audio_streams <= 0:
+        return False
+    if str(summary.get("probe_source") or "") in {"ffprobe_json", "ffmpeg_decode"}:
+        return True
+    decoded_container = probe_audio_container(path)
+    if decoded_container == "ogg":
+        decoded_container = "m4a"
+    return decoded_container == expected_extension
+
+
 def _resolve_batch_transcode_choice(
     logger: logging.Logger,
     config: BatchRunConfig,
@@ -872,7 +912,11 @@ def _finalize_prepared_artifact(
             artist_name=artist_name,
         )
         final_target, publish_mode, existing_platform = publish_hint
-        if final_target.exists() and publish_mode == "existing_same_platform":
+        if (
+            final_target.exists()
+            and publish_mode == "existing_same_platform"
+            and _existing_completed_output_is_usable(final_target, final_extension)
+        ):
             _cleanup_working_path(working_path)
             prepared.file_timing["publish_sec"] = round(time.perf_counter() - publish_started, 6)
             prepared.file_timing["total_sec"] = round(time.perf_counter() - file_started, 6)
@@ -910,6 +954,8 @@ def _finalize_prepared_artifact(
                 },
             )
             return "already_decrypted", result
+        if final_target.exists() and publish_mode == "existing_same_platform":
+            logger.info("overwrite_unverified_existing_output: %s -> %s", prepared.input_path.name, final_target)
 
         published = _publish_file(working_path, final_target)
         prepared.file_timing["publish_sec"] = round(time.perf_counter() - publish_started, 6)
@@ -1161,22 +1207,33 @@ def run_batch(config: BatchRunConfig, adapter: PlatformAdapter) -> int:
         desired_target = adapter.desired_target_format(file_path, config.settings)
 
         dedupe_started = time.perf_counter()
-        if predicted_ext and not transcode_enabled:
+        completed_ext = None
+        if not bool(config.settings.get("group_by_artist")):
+            completed_ext = _predecode_completed_extension(
+                predicted_ext=predicted_ext,
+                desired_target=desired_target,
+                transcode_enabled=transcode_enabled,
+            )
+        if completed_ext:
             hinted_target, hinted_mode, _ = _resolve_publish_target(
                 base_name=basename,
                 input_path=file_path,
-                extension=predicted_ext,
+                extension=completed_ext,
                 platform_id=config.platform_id,
                 output_dir=config.output_dir,
                 manifest_repo=manifest_repo,
                 config=config,
             )
-            if hinted_target.exists() and hinted_mode == "existing_same_platform":
+            if (
+                hinted_target.exists()
+                and hinted_mode == "existing_same_platform"
+                and _existing_completed_output_is_usable(hinted_target, completed_ext)
+            ):
                 skipped_count += 1
                 file_timing["dedupe_sec"] = round(time.perf_counter() - dedupe_started, 6)
                 file_timing["total_sec"] = round(time.perf_counter() - file_started, 6)
                 _accumulate(timing_batch_total, file_timing)
-                logger.info("skip_duplicate: %s -> %s", file_path.name, hinted_target)
+                logger.info("skip_existing_verified_output: %s -> %s", file_path.name, hinted_target)
                 logger.info("[timing] file_done [%d/%d] %s reason=already_decrypted %s", index, len(files), file_path.name, timing_text(file_timing))
                 result = FileResult(ok=True, skipped=True, platform_id=config.platform_id, input_path=str(file_path), output_path=str(hinted_target), reason="already_decrypted", timing=_copy_timing(file_timing))
                 results.append(result)
@@ -1194,6 +1251,8 @@ def run_batch(config: BatchRunConfig, adapter: PlatformAdapter) -> int:
                     },
                 )
                 continue
+            if hinted_target.exists() and hinted_mode == "existing_same_platform":
+                logger.info("existing_output_reprocess: %s -> %s reason=unverified_or_mismatched", file_path.name, hinted_target)
         file_timing["dedupe_sec"] = round(time.perf_counter() - dedupe_started, 6)
 
         working_path: pathlib.Path | None = None
