@@ -7,6 +7,7 @@ import sys
 from typing import Any, Callable
 
 from src.Application.decrypt_service import run_batch
+from src.Application.sample_verification_service import DEFAULT_SAMPLE_PLATFORMS, run_sample_verification
 from src.Application.transcode_batch_service import (
     ALL_SOURCE_FORMAT,
     run_transcode_batch,
@@ -185,6 +186,40 @@ def _run_transcode_batch_cli(paths: RuntimePaths, config: dict[str, Any], args: 
         event_sink=build_transcode_batch_event_sink(),
     )
     return 0 if result.failed_count == 0 else 1
+
+
+def _run_sample_verify_cli(paths: RuntimePaths, config: dict[str, Any], args: argparse.Namespace) -> int:
+    input_values = list(args.input or [])
+    if not input_values:
+        print("请通过 --input 指定至少一个待扫描目录。", file=sys.stderr)
+        return 2
+    output_dir = pathlib.Path(args.output or (pathlib.Path("C:/") / "qkk_sample_verify"))
+    raw_platforms = tuple(args.verify_platform or ("all",))
+    platforms = DEFAULT_SAMPLE_PLATFORMS if "all" in raw_platforms else tuple(raw_platforms)
+    summary = run_sample_verification(
+        input_paths=[pathlib.Path(item) for item in input_values],
+        output_dir=output_dir,
+        config=config,
+        paths=paths,
+        platforms=platforms,
+        recursive=not bool(args.no_recursive),
+        max_workers=int(args.max_workers or 2),
+        bitrate_kbps=int(args.bitrate or 320),
+    )
+    for item in summary.results:
+        label = PLATFORM_LABELS.get(item.platform_id, item.platform_id)
+        if item.status == "not_found":
+            print(f"{label}: 未发现样本 {item.input_path}")
+        elif item.status == "verified":
+            print(f"{label}: 验证通过 {len(item.verified_outputs)} 个输出")
+            for output_path in item.verified_outputs:
+                print(f"  {output_path}")
+        else:
+            print(f"{label}: 验证失败 {item.reason}")
+    print(f"样本扫描完成：候选 {summary.total_candidates}，严格验证通过 {summary.verified_count}，失败 {summary.failed_count}")
+    if summary.exit_code == 3:
+        print("未找到可验证样本，不能视为平台真实样本验证完成。")
+    return summary.exit_code
 
 
 def _run_kugou_refresh_key_cli(paths: RuntimePaths, config: dict[str, Any], args: argparse.Namespace) -> int:
@@ -473,6 +508,14 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
     transcode_parser.add_argument("--no-recursive", action="store_true", help="禁用递归扫描")
     transcode_parser.add_argument("--max-workers", type=int, choices=[1, 2, 3, 4], help="并发转码任务数，1-4")
     transcode_parser.add_argument("--rule", action="append", help="规则格式：<source>:<target>[:sample_rate_hz[:bitrate_kbps]]，例如 全部:m4a:48000:256")
+
+    verify_parser = sub.add_parser("sample-verify", help="扫描真实样本并解密转码为 mp3 后严格验证")
+    verify_parser.add_argument("--input", action="append", help="待扫描文件或目录，可重复传入")
+    verify_parser.add_argument("--output", help="验证输出目录，默认 C:\\qkk_sample_verify")
+    verify_parser.add_argument("--platform", dest="verify_platform", action="append", choices=("all", *DEFAULT_SAMPLE_PLATFORMS), help="验证平台，可重复传入，默认 all")
+    verify_parser.add_argument("--no-recursive", action="store_true", help="禁用递归扫描")
+    verify_parser.add_argument("--max-workers", type=int, choices=[1, 2, 3, 4], help="平台解密后统一转码并发数，1-4")
+    verify_parser.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3 验证输出码率 kbps")
     return parser
 
 
@@ -488,6 +531,8 @@ def main(argv: list[str] | None = None) -> int:
     _, config = load_config(paths)
     if args.platform == "transcode-batch":
         return _run_transcode_batch_cli(paths, config, args)
+    if args.platform == "sample-verify":
+        return _run_sample_verify_cli(paths, config, args)
     if args.platform == "kugou" and args.command == "refresh-key":
         return _run_kugou_refresh_key_cli(paths, config, args)
     if args.command != "decrypt":

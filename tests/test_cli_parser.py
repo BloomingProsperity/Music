@@ -194,6 +194,70 @@ class CliParserTests(unittest.TestCase):
                 self.assertEqual(args.command, "decrypt")
                 self.assertEqual(args.format_kwm, target_format)
 
+    def test_sample_verify_parser_accepts_inputs_platforms_and_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            parser = build_parser(_runtime_paths(root))
+
+            args = parser.parse_args(
+                [
+                    "sample-verify",
+                    "--input",
+                    r"C:\music",
+                    "--input",
+                    r"D:\music",
+                    "--output",
+                    r"C:\qkk_verify",
+                    "--platform",
+                    "netease",
+                    "--platform",
+                    "kuwo",
+                    "--bitrate",
+                    "320",
+                    "--max-workers",
+                    "2",
+                    "--no-recursive",
+                ]
+            )
+
+        self.assertEqual(args.platform, "sample-verify")
+        self.assertEqual(args.input, [r"C:\music", r"D:\music"])
+        self.assertEqual(args.output, r"C:\qkk_verify")
+        self.assertEqual(args.verify_platform, ["netease", "kuwo"])
+        self.assertEqual(args.bitrate, 320)
+        self.assertEqual(args.max_workers, 2)
+        self.assertTrue(args.no_recursive)
+
+    def test_sample_verify_cli_returns_service_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            config = {"shared": {}, "qq": {}, "kugou": {}, "netease": {}, "kuwo": {}}
+            summary = mock.Mock(exit_code=3, results=[], total_candidates=0, verified_count=0, failed_count=0)
+
+            with (
+                mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(cli, "load_config", return_value=({}, config)),
+                mock.patch.object(cli, "run_sample_verification", return_value=summary) as verify,
+            ):
+                result = cli.main(
+                    [
+                        "sample-verify",
+                        "--input",
+                        str(root),
+                        "--output",
+                        str(root / "out"),
+                        "--platform",
+                        "netease",
+                    ]
+                )
+
+        self.assertEqual(result, 3)
+        verify.assert_called_once()
+        self.assertEqual(verify.call_args.kwargs["input_paths"], [pathlib.Path(root)])
+        self.assertEqual(verify.call_args.kwargs["output_dir"], pathlib.Path(root / "out"))
+        self.assertEqual(verify.call_args.kwargs["platforms"], ("netease",))
+
 
 if __name__ == "__main__":
     unittest.main()

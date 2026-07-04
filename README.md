@@ -91,6 +91,20 @@ python main.py qq decrypt --input D:\ --output C:\qkk_mp3 --format-mflac mp3 --b
 可选采样率：`22050` / `32000` / `44100` / `48000` / `88200` / `96000` Hz。
 可选码率：`96` / `128` / `160` / `192` / `256` / `320` kbps。
 
+## 样本验证
+
+要确认真实样本是否能最终输出可播放的 mp3，可以用 `sample-verify`。它会扫描指定目录，按平台解密为 mp3，再用 ffmpeg 严格解码输出文件；没有样本时会明确报告未验证。
+
+```powershell
+python main.py sample-verify --input D:\music --output C:\qkk_sample_verify --platform all --bitrate 320 --max-workers 2
+```
+
+也可以只验证某几个平台：
+
+```powershell
+python main.py sample-verify --input C:\music --input D:\music --output C:\qkk_sample_verify --platform netease --platform kuwo
+```
+
 ## UI 路线
 
 UI 版本继续使用 **PySide6**，并逐步引入 **QFluentWidgets** 做导航、卡片和桌面风格控件，目标体验参考 Steam++：
