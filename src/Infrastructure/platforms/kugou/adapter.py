@@ -38,6 +38,8 @@ class KugouPlatformAdapter:
             value = str(settings.get("target_format_kgma", "auto") or "auto").strip().lower().lstrip(".")
         if value == "ogg":
             value = "m4a"
+        if value == "auto" and "".join(input_path.suffixes).lower() in {".kgm.flac", ".vpr.flac"}:
+            return "flac"
         return None if value == "auto" else value
 
     def desired_target_format(self, input_path: pathlib.Path, settings: dict) -> str:

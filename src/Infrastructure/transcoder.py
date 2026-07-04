@@ -83,11 +83,8 @@ def resolve_ffprobe_path(paths: RuntimePaths | None = None) -> pathlib.Path | No
     return None
 
 
-def fast_detect_container(path: pathlib.Path) -> str:
-    if not path.exists() or path.stat().st_size < 4:
-        return "bin"
-    with path.open("rb") as source:
-        head = source.read(64)
+def detect_container_from_header(head: bytes | bytearray | memoryview) -> str:
+    head = bytes(head)
     if head.startswith(b"fLaC"):
         return "flac"
     if head.startswith(b"OggS"):
@@ -101,6 +98,14 @@ def fast_detect_container(path: pathlib.Path) -> str:
     if len(head) >= 12 and head[4:8] == b"ftyp":
         return "m4a"
     return "bin"
+
+
+def fast_detect_container(path: pathlib.Path) -> str:
+    if not path.exists() or path.stat().st_size < 4:
+        return "bin"
+    with path.open("rb") as source:
+        head = source.read(64)
+    return detect_container_from_header(head)
 
 
 def probe_audio_container(input_path: pathlib.Path) -> str | None:

@@ -315,14 +315,40 @@ def _safe_path_segment(value: str) -> str:
     return cleaned[:120] or ""
 
 
+def _artist_name_parts(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        for key in ("name", "artistName", "artist_name", "title"):
+            if value.get(key):
+                return _artist_name_parts(value.get(key))
+        return []
+    if isinstance(value, (list, tuple)):
+        if len(value) >= 2 and isinstance(value[0], str) and isinstance(value[1], (int, float)):
+            return [value[0]]
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, (list, tuple)) and item:
+                parts.extend(_artist_name_parts(item[0]))
+            else:
+                parts.extend(_artist_name_parts(item))
+        return parts
+    return [str(value)]
+
+
 def _artist_from_summary_or_filename(summary: dict[str, Any], input_path: pathlib.Path) -> str:
     metadata = summary.get("metadata") if isinstance(summary, dict) else {}
     metadata = metadata if isinstance(metadata, dict) else {}
     for key in ("artist", "ARTIST", "album_artist", "ALBUMARTIST", "aART", "\xa9ART"):
         value = metadata.get(key)
-        if isinstance(value, list) and value:
-            value = value[0]
-        artist = _safe_path_segment(str(value or ""))
+        pieces = []
+        for part in _artist_name_parts(value):
+            safe = _safe_path_segment(part)
+            if safe and safe not in pieces:
+                pieces.append(safe)
+        artist = "、".join(pieces)
         if artist:
             return artist
     stem = input_path.stem

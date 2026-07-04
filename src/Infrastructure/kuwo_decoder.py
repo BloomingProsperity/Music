@@ -3,7 +3,7 @@ from __future__ import annotations
 import pathlib
 import time
 
-from src.Infrastructure.transcoder import detect_audio_container
+from src.Infrastructure.transcoder import detect_audio_container, detect_container_from_header
 from src.Infrastructure.xor_stream import xor_repeating_key_inplace
 
 
@@ -48,6 +48,19 @@ def find_kwm_key(input_path: pathlib.Path) -> tuple[bytes, str]:
     if len(last) != KEY_SIZE:
         raise KwmDecodeError("kwm key material is missing")
     return _swap_key_halves(last), "fallback_swap"
+
+
+def peek_kwm_payload_container(input_path: pathlib.Path) -> str | None:
+    input_path = pathlib.Path(input_path).expanduser().resolve()
+    key, _key_source = find_kwm_key(input_path)
+    with input_path.open("rb") as source:
+        source.seek(HEADER_SIZE)
+        header = bytearray(source.read(64))
+    if not header:
+        return None
+    xor_repeating_key_inplace(header, key, 0)
+    container = detect_container_from_header(header)
+    return None if container == "bin" else container
 
 
 def decode_kwm_file(input_path: pathlib.Path, output_dir: pathlib.Path) -> dict:

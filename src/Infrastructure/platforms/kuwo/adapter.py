@@ -3,7 +3,7 @@ from __future__ import annotations
 import pathlib
 from dataclasses import dataclass
 
-from src.Infrastructure.kuwo_decoder import decode_kwm_file
+from src.Infrastructure.kuwo_decoder import decode_kwm_file, peek_kwm_payload_container
 from src.Infrastructure.transcoder import normalize_target_format
 
 
@@ -39,7 +39,12 @@ class KuwoPlatformAdapter:
 
     def predicted_extension(self, input_path: pathlib.Path, settings: dict) -> str | None:
         target = normalize_target_format(settings.get("target_format_kwm", "auto"))
-        return None if target == "auto" else target
+        if target != "auto":
+            return target
+        try:
+            return peek_kwm_payload_container(input_path)
+        except Exception:
+            return None
 
     def desired_target_format(self, input_path: pathlib.Path, settings: dict) -> str:
         return normalize_target_format(settings.get("target_format_kwm", "auto"))

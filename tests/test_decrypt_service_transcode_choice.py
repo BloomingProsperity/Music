@@ -12,6 +12,7 @@ from src.Application import decrypt_service
 from src.Application.decrypt_service import (
     _PreparedArtifact,
     _artifact_needs_transcode,
+    _artist_from_summary_or_filename,
     _maybe_transcode,
     _resolve_publish_target,
     _resolve_batch_transcode_choice,
@@ -98,6 +99,18 @@ class TranscodeChoiceTests(unittest.TestCase):
 
     def test_transcode_worker_count_keeps_user_defined_parallelism(self) -> None:
         self.assertEqual(_transcode_worker_count({"transcode_max_workers": 12}), 12)
+
+    def test_artist_grouping_uses_netease_artist_names_instead_of_raw_arrays(self) -> None:
+        artist = _artist_from_summary_or_filename(
+            {
+                "metadata": {
+                    "artist": [["Tester", 1001], ["Guest", 1002]],
+                }
+            },
+            pathlib.Path("Tester - Local E2E.ncm"),
+        )
+
+        self.assertEqual(artist, "Tester、Guest")
 
     def test_publish_target_can_group_by_artist(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
