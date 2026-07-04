@@ -328,5 +328,42 @@ class CliParserTests(unittest.TestCase):
         self.assertNotIn("未找到可验证样本，不能视为平台真实样本验证完成。", output)
 
 
+    def test_self_test_cli_runs_synthetic_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            config = {"shared": {}, "qq": {}, "kugou": {}, "netease": {}, "kuwo": {}}
+            summary = mock.Mock(exit_code=0, results=[], total_candidates=4, verified_count=4, failed_count=0)
+
+            with (
+                mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(cli, "load_config", return_value=({}, config)),
+                mock.patch.object(cli, "run_synthetic_self_test", return_value=summary) as self_test,
+                mock.patch.object(
+                    cli,
+                    "write_sample_verification_reports",
+                    return_value=(root / "out" / "sample_verify_report.json", root / "out" / "sample_verify_report.txt"),
+                ) as write_reports,
+            ):
+                result = cli.main(
+                    [
+                        "self-test",
+                        "--output",
+                        str(root / "out"),
+                        "--bitrate",
+                        "128",
+                        "--max-workers",
+                        "1",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        self_test.assert_called_once()
+        self.assertEqual(self_test.call_args.kwargs["output_dir"], pathlib.Path(root / "out"))
+        self.assertEqual(self_test.call_args.kwargs["max_workers"], 1)
+        self.assertEqual(self_test.call_args.kwargs["bitrate_kbps"], 128)
+        write_reports.assert_called_once_with(summary, pathlib.Path(root / "out"))
+
+
 if __name__ == "__main__":
     unittest.main()

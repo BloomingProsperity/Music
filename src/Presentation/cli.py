@@ -12,6 +12,7 @@ from src.Application.sample_verification_service import (
     run_sample_verification,
     write_sample_verification_reports,
 )
+from src.Application.synthetic_self_test_service import run_synthetic_self_test
 from src.Application.transcode_batch_service import (
     ALL_SOURCE_FORMAT,
     run_transcode_batch,
@@ -230,6 +231,34 @@ def _run_sample_verify_cli(paths: RuntimePaths, config: dict[str, Any], args: ar
             print("部分平台未发现样本，不能视为全部平台真实样本验证完成。")
         else:
             print("未找到可验证样本，不能视为平台真实样本验证完成。")
+    return summary.exit_code
+
+
+def _run_self_test_cli(paths: RuntimePaths, config: dict[str, Any], args: argparse.Namespace) -> int:
+    output_dir = pathlib.Path(args.output or (pathlib.Path("C:/") / "qkk_self_test"))
+    raw_platforms = tuple(args.self_test_platform or ("all",))
+    platforms = DEFAULT_SAMPLE_PLATFORMS if "all" in raw_platforms else tuple(raw_platforms)
+    summary = run_synthetic_self_test(
+        output_dir=output_dir,
+        config=config,
+        paths=paths,
+        platforms=platforms,
+        max_workers=int(args.max_workers or 1),
+        bitrate_kbps=int(args.bitrate or 128),
+        fresh=not bool(args.no_fresh),
+    )
+    for item in summary.results:
+        label = PLATFORM_LABELS.get(item.platform_id, item.platform_id)
+        if item.status == "verified":
+            print(f"{label}: 自检通过 {len(item.verified_outputs)} 个输出")
+            for output_path in item.verified_outputs:
+                print(f"  {output_path}")
+        else:
+            print(f"{label}: 自检失败 {item.reason or item.status}")
+    print(f"自检完成：候选 {summary.total_candidates}，严格验证通过 {summary.verified_count}，失败 {summary.failed_count}")
+    json_report, text_report = write_sample_verification_reports(summary, output_dir)
+    print(f"验证报告：{json_report}")
+    print(f"文本报告：{text_report}")
     return summary.exit_code
 
 
@@ -528,6 +557,12 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
     verify_parser.add_argument("--max-workers", type=int, help="平台解密后转码并发数，正整数")
     verify_parser.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3 验证输出码率 kbps")
     verify_parser.add_argument("--fresh", action="store_true", help="清空对应平台验证输出后重新解密转码")
+    self_test_parser = sub.add_parser("self-test", help="生成本地合成样本并验证解密转码链路")
+    self_test_parser.add_argument("--output", help="自检输出目录，默认 C:\\qkk_self_test")
+    self_test_parser.add_argument("--platform", dest="self_test_platform", action="append", choices=("all", *DEFAULT_SAMPLE_PLATFORMS), help="自检平台，可重复传入，默认 all")
+    self_test_parser.add_argument("--max-workers", type=int, help="平台解密后转码并发数，正整数")
+    self_test_parser.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3 自检输出码率 kbps")
+    self_test_parser.add_argument("--no-fresh", action="store_true", help="保留上一次自检输入和输出")
     return parser
 
 
@@ -545,6 +580,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_transcode_batch_cli(paths, config, args)
     if args.platform == "sample-verify":
         return _run_sample_verify_cli(paths, config, args)
+    if args.platform == "self-test":
+        return _run_self_test_cli(paths, config, args)
     if args.platform == "kugou" and args.command == "refresh-key":
         return _run_kugou_refresh_key_cli(paths, config, args)
     if args.command != "decrypt":

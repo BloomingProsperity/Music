@@ -20,8 +20,8 @@ from src.Infrastructure.update_service import (
 )
 
 
-def test_app_version_defaults_to_v011() -> None:
-    assert APP_VERSION == "0.11"
+def test_app_version_defaults_to_v012() -> None:
+    assert APP_VERSION == "0.12"
 
 
 def test_resolve_app_version_includes_git_commit_when_available(tmp_path: pathlib.Path, monkeypatch) -> None:
@@ -32,13 +32,13 @@ def test_resolve_app_version_includes_git_commit_when_available(tmp_path: pathli
 
     monkeypatch.setattr("src.Infrastructure.update_service.subprocess.run", fake_run)
 
-    assert resolve_app_version(tmp_path) == "0.11"
+    assert resolve_app_version(tmp_path) == "0.12"
 
 
 def test_resolve_app_version_uses_local_update_marker_without_git(tmp_path: pathlib.Path) -> None:
     (tmp_path / ".qkk-version").write_text("20260704163300", encoding="utf-8")
 
-    assert resolve_app_version(tmp_path) == "0.11"
+    assert resolve_app_version(tmp_path) == "0.12"
 
 
 def test_check_update_availability_reports_new_remote_revision(tmp_path: pathlib.Path, monkeypatch) -> None:
@@ -49,8 +49,8 @@ def test_check_update_availability_reports_new_remote_revision(tmp_path: pathlib
 
     assert result.ok is True
     assert result.update_available is True
-    assert result.current_version == "0.11"
-    assert result.latest_version == "0.11"
+    assert result.current_version == "0.12"
+    assert result.latest_version == "0.12"
     assert result.current_revision == "abc1234"
     assert result.latest_revision == "def5678"
 
@@ -349,6 +349,96 @@ def test_deploy_script_downloads_remote_tree_without_redownloading_existing_ffmp
     assert (install_dir / ".qkk-version").read_text(encoding="utf-8").strip() == "abcdef1"
 
 
+def test_deploy_script_ignores_archive_url_and_uses_incremental_tree(tmp_path: pathlib.Path) -> None:
+    install_dir = tmp_path / "install"
+    ffmpeg_path = install_dir / "assets" / "ffmpeg-win-x86_64-v7.1.exe"
+    ffmpeg_path.parent.mkdir(parents=True)
+    ffmpeg_path.write_bytes(b"existing-ffmpeg")
+    requested_paths: list[str] = []
+    tree_payload = {
+        "sha": "abcdef1234567890",
+        "tree": [
+            {"path": "requirements.txt", "type": "blob", "sha": "requirements-sha"},
+            {"path": "update.ps1", "type": "blob", "sha": "update-sha"},
+            {"path": "ui_main.py", "type": "blob", "sha": "ui-sha"},
+        ],
+    }
+    raw_payloads = {
+        "requirements.txt": b"PySide6\n",
+        "update.ps1": b"Write-Host update\n",
+        "ui_main.py": b"print('ui')\n",
+    }
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            path = unquote(self.path)
+            requested_paths.append(path)
+            if path == "/tree":
+                body = json.dumps(tree_payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if path.startswith("/raw/"):
+                relative_path = path.removeprefix("/raw/")
+                body = raw_payloads[relative_path]
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if path == "/source.zip":
+                self.send_error(500)
+                return
+            self.send_error(404)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        completed = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(pathlib.Path(__file__).resolve().parents[1] / "deploy.ps1"),
+                "-InstallDir",
+                str(install_dir),
+                "-RepoZipUrl",
+                f"http://127.0.0.1:{port}/source.zip",
+                "-TreeApiUrl",
+                f"http://127.0.0.1:{port}/tree",
+                "-RawContentBaseUrl",
+                f"http://127.0.0.1:{port}/raw",
+                "-NoLaunch",
+                "-NoShortcut",
+                "-SkipDependencyInstall",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "/source.zip" not in requested_paths
+    assert requested_paths == ["/tree", "/raw/requirements.txt", "/raw/update.ps1", "/raw/ui_main.py"]
+    assert (install_dir / "requirements.txt").read_text(encoding="utf-8") == "PySide6\n"
+    assert (install_dir / ".qkk-version").read_text(encoding="utf-8").strip() == "abcdef1"
+
+
 def test_run_update_reports_missing_update_entry(tmp_path: pathlib.Path) -> None:
     result = run_update(tmp_path)
 
@@ -369,7 +459,7 @@ def test_run_update_executes_command_and_returns_output(tmp_path: pathlib.Path, 
     assert result.ok is True
     assert "updated" in result.message
     assert (tmp_path / ".qkk-version").exists()
-    assert "0.11" in result.message
+    assert "0.12" in result.message
 
 
 def test_build_restart_command_reuses_current_python_entry(tmp_path: pathlib.Path) -> None:

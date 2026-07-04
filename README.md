@@ -41,7 +41,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 ```
 
 如果电脑没有 Python 3.10+，脚本会尝试通过 `winget` 安装 Python 3.12。
-重复部署或客户端更新时只同步变化文件；本地已有 `ffmpeg` 时不会重新下载。
+重复部署或客户端更新时只同步变化文件，不下载仓库 zip；本地已有 `ffmpeg` 时不会重新下载。
 
 默认安装到：
 
@@ -73,6 +73,16 @@ python main.py qq decrypt --input D:\ --output C:\qkk_mp3 --format-mflac mp3 --b
 
 可选采样率：`22050` / `32000` / `44100` / `48000` / `88200` / `96000` Hz。
 可选码率：`96` / `128` / `160` / `192` / `256` / `320` kbps。
+
+## 本机自检
+
+部署后可以先跑一遍自检。它会生成本地合成样本，验证 QQ、酷狗、网易云、酷我的解密、转码和严格解码链路：
+
+```powershell
+python main.py self-test --output C:\qkk_self_test --bitrate 128 --max-workers 1
+```
+
+自检样本只用于确认本机环境和算法链路可运行，不代表所有真实文件都已覆盖。
 
 ## 样本验证
 

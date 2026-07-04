@@ -95,35 +95,6 @@ function Invoke-Python {
     }
 }
 
-function Copy-SourceTree {
-    param(
-        [string]$SourceDir,
-        [string]$TargetDir
-    )
-
-    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
-    $excludeDirs = @(".git", ".venv", "build", "dist", "_log", "_output", "__pycache__", ".pytest_cache")
-    $excludeFiles = @("config.json", ".qkk-version", ".qkk-update-manifest.json")
-    $args = @(
-        $SourceDir,
-        $TargetDir,
-        "/MIR",
-        "/FFT",
-        "/R:2",
-        "/W:2",
-        "/NFL",
-        "/NDL",
-        "/NJH",
-        "/NJS",
-        "/XD"
-    ) + $excludeDirs + @("/XF") + $excludeFiles
-
-    & robocopy @args | Out-Null
-    if ($LASTEXITCODE -gt 7) {
-        throw "Failed to copy source files into $TargetDir"
-    }
-}
-
 function New-DesktopShortcut {
     param([string]$TargetDir)
 
@@ -336,34 +307,12 @@ function Sync-SourceTreeFromRemoteTree {
 }
 
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
-$TempRoot = Join-Path $env:TEMP ("qkkdeploy-" + [guid]::NewGuid().ToString("N"))
-$ZipPath = Join-Path $TempRoot "source.zip"
-$ExtractDir = Join-Path $TempRoot "source"
 
 try {
     Write-Step "Installing to $InstallDir"
 
-    if ($RepoZipUrl) {
-        New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
-
-        Write-Step "Downloading source package"
-        Invoke-WebRequest -Uri $RepoZipUrl -OutFile $ZipPath -UseBasicParsing
-
-        Write-Step "Extracting source package"
-        Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
-        $SourceRoot = Get-ChildItem -Path $ExtractDir -Directory | Select-Object -First 1
-        if ($null -eq $SourceRoot) {
-            throw "Downloaded package did not contain a source directory."
-        }
-
-        Write-Step "Syncing source files"
-        Copy-SourceTree -SourceDir $SourceRoot.FullName -TargetDir $InstallDir
-        $Revision = Write-UpdateManifestFromRemoteTree -TargetDir $InstallDir
-    }
-    else {
-        Write-Step "Syncing source files"
-        $Revision = Sync-SourceTreeFromRemoteTree -TargetDir $InstallDir
-    }
+    Write-Step "Syncing source files"
+    $Revision = Sync-SourceTreeFromRemoteTree -TargetDir $InstallDir
     if (-not $Revision) {
         $Revision = Get-RemoteRevisionId
     }
@@ -415,8 +364,6 @@ try {
         Start-Process -FilePath $VenvPython -ArgumentList "`"$InstallDir\ui_main.py`"" -WorkingDirectory $InstallDir
     }
 }
-finally {
-    if (Test-Path $TempRoot) {
-        Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
-    }
+catch {
+    throw
 }
