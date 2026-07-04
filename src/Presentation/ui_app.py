@@ -618,7 +618,7 @@ class MainWindow(QWidget):
         qq_page.fetch_ekey.setChecked(bool(qq.get("qq_fetch_missing_ekey", True)))
         qq_page.cache_ekey.setChecked(bool(qq.get("qq_cache_ekeys", True)))
 
-        for platform_id in ("kugou", "netease"):
+        for platform_id in ("kugou", "netease", "kuwo"):
             page = self.pages[platform_id]
             values = self.config.get(platform_id, {})
             page.input_path.set_text(str(values.get("input_dir", "")))
@@ -631,9 +631,6 @@ class MainWindow(QWidget):
             page.album.setChecked(bool(shared.get("supplement_album_metadata", False)))
             page.group_by_artist.setChecked(bool(shared.get("group_by_artist", False)))
             page.delete_source.setChecked(bool(shared.get("delete_source_after_success", False)))
-        kuwo_page = self.pages["kuwo"]
-        kuwo_page.output_dir.set_text(str(self.paths.output_dir / "kuwo"))
-        kuwo_page.delete_source.setChecked(bool(shared.get("delete_source_after_success", False)))
 
     def _save_platform_config(self, platform_id: str, page: PlatformPage) -> None:
         self.root_config, self.config = load_config(self.paths)

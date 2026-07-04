@@ -28,12 +28,12 @@
   - 文件级离线解密，默认使用本地流式解码，减少大文件内存占用
   - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
 - `酷我音乐`
-  - 控制台支持 `.kwm`
+  - 支持 `.kwm`
   - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
 
-## 一键部署到另一台 Windows 电脑
+## 一键部署
 
-在另一台电脑打开 PowerShell，执行下面一条命令即可安装并启动 UI：
+打开 PowerShell，执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/BloomingProsperity/Music/codex/platforms-ncm-kuwo-upgrade/deploy.ps1 | iex"
@@ -69,12 +69,6 @@ python main.py qq decrypt --input D:\ --output C:\qkk_mp3 --format-mflac mp3 --b
 
 `--transcode-workers` 和 `--max-workers` 接受正整数，不再限制为 4。机械盘/U 盘建议 `1` 或 `2`，CPU 和 SSD 都有余量时再提高。
 
-UI 里的输出目录支持一键打开。勾选“按音乐作者分类”后，同一作者的输出文件会进入对应子目录。勾选“完成后删除源文件”后，只有确认成品输出成功才会删除源加密文件。批量解密时，已解密且需要转码的文件超过 10 个后会启动同步转码队列，界面会分别显示解密和转码进度、成功数、失败数和成功率。
-
-UI 侧栏版本号保持简洁显示，例如 `0.02`。如果有新版本，更新按钮会显示“已有版本更新”；点击后会自动更新并重启客户端。
-
-支持输入格式：`flac` / `m4a` / `mp3` / `wav` / `ogg` / `aac` / `ape`。
-支持输出格式：`mp3` / `flac` / `m4a` / `wav`。
 可选采样率：`22050` / `32000` / `44100` / `48000` / `88200` / `96000` Hz。
 可选码率：`96` / `128` / `160` / `192` / `256` / `320` kbps。
 

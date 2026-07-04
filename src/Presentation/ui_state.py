@@ -106,8 +106,8 @@ def platform_specs() -> list[PlatformSpec]:
             format_controls=(
                 FormatControlSpec("target_format_kwm", "kwm 输出格式", ("auto", *TARGET_FORMATS), "auto"),
             ),
-            enabled=False,
-            status_text="暂不可用",
+            enabled=True,
+            status_text="可用",
         ),
     ]
 
@@ -236,6 +236,8 @@ def build_platform_batch_config(platform_id: str, options: PlatformRunOptions) -
             value = str(raw_settings.get(key, "") or "").strip()
             if value:
                 settings[key] = value
+    elif normalized_platform == "kuwo":
+        settings["target_format_kwm"] = _normalize_target(raw_settings.get("target_format_kwm", "auto"))
     else:
         raise ValueError(f"unsupported platform: {platform_id}")
 

@@ -40,7 +40,8 @@ def test_platform_specs_keep_core_pages_and_formats() -> None:
     assert [control.key for control in specs[3].format_controls] == ["target_format_kwm"]
     assert specs[1].enabled is True
     assert specs[2].enabled is True
-    assert specs[3].enabled is False
+    assert specs[3].enabled is True
+    assert specs[3].status_text == "可用"
 
 
 def test_platform_specs_do_not_put_development_explanations_in_ui_text() -> None:
@@ -164,6 +165,36 @@ def test_build_platform_batch_config_preserves_kugou_key_and_db_settings() -> No
     assert batch_config.settings["kgg_db_path"] == r"C:\keys\KGMusicV3.db"
     assert batch_config.settings["transcode_enabled"] is False
     assert batch_config.settings["transcode_max_workers"] == 1
+
+
+def test_build_platform_batch_config_preserves_kuwo_settings_and_callbacks() -> None:
+    seen: list[tuple[str, dict]] = []
+    options = PlatformRunOptions(
+        input_path=pathlib.Path(r"C:\music\kuwo"),
+        output_dir=pathlib.Path(r"C:\music\out"),
+        recursive=False,
+        transcode_enabled=True,
+        transcode_max_workers=5,
+        sample_rate_hz=48000,
+        bitrate_kbps=192,
+        platform_settings={"target_format_kwm": "mp3"},
+        event_sink=lambda event, payload: seen.append((event, payload)),
+        stop_requested=lambda: False,
+    )
+
+    batch_config = build_platform_batch_config("kuwo", options)
+
+    assert batch_config.platform_id == "kuwo"
+    assert batch_config.input_path == pathlib.Path(r"C:\music\kuwo")
+    assert batch_config.output_dir == pathlib.Path(r"C:\music\out")
+    assert batch_config.recursive is False
+    assert batch_config.settings["target_format_kwm"] == "mp3"
+    assert batch_config.settings["transcode_enabled"] is True
+    assert batch_config.settings["transcode_max_workers"] == 5
+    assert batch_config.settings["transcode_sample_rate_hz"] == 48000
+    assert batch_config.settings["transcode_bitrate_kbps"] == 192
+    assert batch_config.event_sink is options.event_sink
+    assert batch_config.stop_requested is options.stop_requested
 
 
 def test_validate_writable_output_dir_creates_and_cleans_probe_file(tmp_path: pathlib.Path) -> None:

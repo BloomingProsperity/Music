@@ -48,8 +48,9 @@ class _ImmediateThread:
 
 
 class _FakeAdapter:
-    platform_id = "netease"
-    display_name = "网易云音乐"
+    def __init__(self, platform_id: str = "netease", display_name: str = "网易云音乐") -> None:
+        self.platform_id = platform_id
+        self.display_name = display_name
 
     def validate_runtime(self, settings: dict) -> tuple[bool, str | None]:
         return True, None
@@ -91,6 +92,42 @@ def test_starting_netease_page_uses_shared_batch_runner(tmp_path: pathlib.Path, 
         "adapter_platform": "netease",
         "batch_platform": "netease",
         "target_format_ncm": "mp3",
+    }
+
+
+def test_starting_kuwo_page_uses_shared_batch_runner(tmp_path: pathlib.Path, monkeypatch) -> None:
+    app = _app()
+    window = MainWindow()
+    page = window.pages["kuwo"]
+    input_dir = tmp_path / "kwm"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    page.input_path.set_text(str(input_dir))
+    page.output_dir.set_text(str(output_dir))
+    page.set_format_values({"target_format_kwm": "mp3"})
+
+    captured: dict[str, object] = {}
+
+    def fake_build_platform_adapter(platform_id: str) -> _FakeAdapter:
+        captured["adapter_platform"] = platform_id
+        return _FakeAdapter(platform_id, "酷我音乐")
+
+    def fake_run_batch(config, adapter) -> int:
+        captured["batch_platform"] = config.platform_id
+        captured["target_format_kwm"] = config.settings["target_format_kwm"]
+        return 0
+
+    monkeypatch.setattr("src.Presentation.ui_app.build_platform_adapter", fake_build_platform_adapter)
+    monkeypatch.setattr("src.Presentation.ui_app.run_batch", fake_run_batch)
+    monkeypatch.setattr("src.Presentation.ui_app.threading.Thread", _ImmediateThread)
+
+    window._start_platform("kuwo")
+    app.processEvents()
+
+    assert captured == {
+        "adapter_platform": "kuwo",
+        "batch_platform": "kuwo",
+        "target_format_kwm": "mp3",
     }
 
 
