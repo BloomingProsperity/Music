@@ -251,6 +251,41 @@ class QQMusicExOfflineTests(unittest.TestCase):
 
             cdll.assert_called_once()
 
+    def test_signed_native_loads_by_default_when_available_in_source_tree(self) -> None:
+        class FakeFunction:
+            def __init__(self) -> None:
+                self.argtypes = None
+                self.restype = None
+
+        class FakeLibrary:
+            def __init__(self) -> None:
+                self.qmc2_decrypt = FakeFunction()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            dll = root / "qmc2_fast.dll"
+            dll.write_bytes(b"fake-dll")
+            (root / "qmc2_fast.dll.sha256").write_text(hashlib.sha256(dll.read_bytes()).hexdigest(), encoding="utf-8")
+            fake_library = FakeLibrary()
+            old_lib = musicex_offline._QMC2_NATIVE_LIB
+            old_attempted = musicex_offline._QMC2_NATIVE_ATTEMPTED
+            musicex_offline._QMC2_NATIVE_LIB = None
+            musicex_offline._QMC2_NATIVE_ATTEMPTED = False
+            try:
+                with (
+                    mock.patch.dict("os.environ", {}, clear=True),
+                    mock.patch.object(musicex_offline.sys, "frozen", False, create=True),
+                    mock.patch.object(musicex_offline, "_qmc2_native_dir", return_value=root),
+                    mock.patch.object(musicex_offline, "_qmc2_native_name", return_value="qmc2_fast.dll"),
+                    mock.patch.object(musicex_offline.ctypes, "CDLL", return_value=fake_library) as cdll,
+                ):
+                    self.assertIs(musicex_offline._load_qmc2_native(), fake_library)
+            finally:
+                musicex_offline._QMC2_NATIVE_LIB = old_lib
+                musicex_offline._QMC2_NATIVE_ATTEMPTED = old_attempted
+
+            cdll.assert_called_once()
+
     def test_payload_decrypt_uses_fast_native_path_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)

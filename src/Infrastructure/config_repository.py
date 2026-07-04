@@ -138,6 +138,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "cli_collision_policy": "suffix",
             "recursive": True,
             "transcode_enabled": True,
+            "transcode_max_workers": 2,
             "embed_cover_art": True,
             "supplement_album_metadata": False,
             "always_run_as_admin": False,
@@ -237,6 +238,10 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     else:
         shared_transcode_enabled = bool(shared_transcode_enabled)
     config["shared"]["transcode_enabled"] = shared_transcode_enabled
+    try:
+        config["shared"]["transcode_max_workers"] = max(1, min(int(config["shared"].get("transcode_max_workers", 2) or 2), 4))
+    except Exception:
+        config["shared"]["transcode_max_workers"] = 2
 
     shared_always_run_as_admin = config["shared"].get("always_run_as_admin", False)
     if isinstance(shared_always_run_as_admin, str):

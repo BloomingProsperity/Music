@@ -369,6 +369,7 @@ def _run_platform(platform_id: str, config: dict, *, input_override: str | None 
     shared = dict(config["shared"])
     settings = dict(config[platform_id])
     settings["transcode_enabled"] = bool(shared.get("transcode_enabled", True))
+    settings["transcode_max_workers"] = max(1, min(int(shared.get("transcode_max_workers", 2) or 2), 4))
     settings["embed_cover_art"] = bool(shared.get("embed_cover_art", True))
     settings["supplement_album_metadata"] = bool(shared.get("supplement_album_metadata", False))
     input_path = pathlib.Path(input_override or settings.get("input_dir") or "")
@@ -530,6 +531,7 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
         transcode_group = dec.add_mutually_exclusive_group()
         transcode_group.add_argument("--transcode", dest="transcode_enabled", action="store_true", help="转码为目标格式")
         transcode_group.add_argument("--no-transcode", dest="transcode_enabled", action="store_false", help="不转码，直接输出解密后的原始音频格式")
+        dec.add_argument("--transcode-workers", type=int, choices=[1, 2, 3, 4], help="平台解密后统一转码的并发数，1-4")
         dec.add_argument("--sample-rate", type=int, choices=TRANSCODE_SAMPLE_RATE_OPTIONS, help="转码采样率 Hz")
         dec.add_argument("--bitrate", type=int, choices=TRANSCODE_BITRATE_OPTIONS, help="mp3/m4a 转码码率 kbps")
         album_group = dec.add_mutually_exclusive_group()
@@ -567,6 +569,8 @@ def main(argv: list[str] | None = None) -> int:
     settings = dict(config[platform_id])
     if args.transcode_enabled is not None:
         config["shared"]["transcode_enabled"] = bool(args.transcode_enabled)
+    if getattr(args, "transcode_workers", None) is not None:
+        config["shared"]["transcode_max_workers"] = int(args.transcode_workers)
     if args.embed_cover_art is not None:
         config["shared"]["embed_cover_art"] = bool(args.embed_cover_art)
     if args.supplement_album_metadata is not None:

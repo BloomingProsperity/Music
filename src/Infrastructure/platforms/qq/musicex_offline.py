@@ -377,7 +377,9 @@ def _qmc2_native_enabled() -> bool:
         return False
     if value in {"1", "true", "yes", "on"}:
         return True
-    return bool(getattr(sys, "frozen", False))
+    if bool(getattr(sys, "frozen", False)):
+        return True
+    return (_qmc2_native_dir() / _qmc2_native_name()).exists()
 
 
 def _qmc2_native_signature_matches(native_path: pathlib.Path) -> bool:

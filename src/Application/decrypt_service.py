@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import pathlib
 import shutil
@@ -106,6 +107,13 @@ def _transcode_audio_profile(settings: dict[str, Any]) -> tuple[int | None, int 
         normalize_sample_rate(settings.get("transcode_sample_rate_hz")),
         normalize_bitrate(settings.get("transcode_bitrate_kbps")),
     )
+
+
+def _transcode_worker_count(settings: dict[str, Any]) -> int:
+    try:
+        return max(1, min(int(settings.get("transcode_max_workers", 2) or 2), 4))
+    except Exception:
+        return 2
 
 
 def _maybe_attach_cover(
@@ -366,6 +374,101 @@ def _maybe_transcode(logger: logging.Logger, input_path: pathlib.Path, target_fo
         current_path.unlink()
     file_timing["transcode_sec"] = round(float(file_timing.get("transcode_sec", 0.0)) + (time.perf_counter() - started), 6)
     return target_path, target_format, meta
+
+
+def _transcode_prepared_artifacts(
+    logger: logging.Logger,
+    config: BatchRunConfig,
+    prepared_artifacts: list[_PreparedArtifact],
+    *,
+    sample_rate_hz: int | None,
+    bitrate_kbps: int | None,
+) -> tuple[list[_PreparedArtifact], list[FileResult]]:
+    pending = [
+        item
+        for item in prepared_artifacts
+        if _artifact_needs_transcode(item.desired_target, item.detected_container)
+    ]
+    if not pending:
+        return prepared_artifacts, []
+
+    worker_count = min(_transcode_worker_count(config.settings), len(pending))
+    logger.info("batch_transcode_workers: pending=%d workers=%d", len(pending), worker_count)
+    completed_ids: set[int] = set()
+    failed_results: list[FileResult] = []
+
+    def _run_one(prepared: _PreparedArtifact) -> tuple[_PreparedArtifact | None, FileResult | None]:
+        try:
+            working_path, final_extension, transcode_meta = _maybe_transcode(
+                logger,
+                prepared.input_path,
+                prepared.desired_target,
+                prepared.working_path,
+                prepared.detected_container,
+                prepared.file_timing,
+                sample_rate_hz=sample_rate_hz,
+                bitrate_kbps=bitrate_kbps,
+            )
+            prepared.working_path = working_path
+            prepared.detected_container = final_extension
+            prepared.detail["detected_container"] = final_extension
+            prepared.detail["final_extension"] = final_extension
+            if transcode_meta is not None:
+                prepared.detail["transcode"] = transcode_meta
+            return prepared, None
+        except Exception as exc:
+            _cleanup_working_path(prepared.working_path)
+            prepared.file_timing["total_sec"] = round(time.perf_counter() - prepared.file_started, 6)
+            logger.warning("failed: %s reason=%s", prepared.input_path.name, exc)
+            logger.info(
+                "[timing] file_done [%d/%d] %s reason=%s %s",
+                prepared.index,
+                prepared.total_count,
+                prepared.input_path.name,
+                exc,
+                timing_text(prepared.file_timing),
+            )
+            result = FileResult(
+                ok=False,
+                skipped=False,
+                platform_id=config.platform_id,
+                input_path=str(prepared.input_path),
+                reason=str(exc),
+                timing=_copy_timing(prepared.file_timing),
+                decrypt_detail_timing=prepared.decrypt_detail_timing,
+                payload=dict(prepared.detail),
+            )
+            _emit_event(
+                config,
+                "file_finished",
+                {
+                    "platform_id": config.platform_id,
+                    "index": prepared.index,
+                    "total": prepared.total_count,
+                    "result": "failed",
+                    "input_path": str(prepared.input_path),
+                    "reason": str(exc),
+                    "timing": dict(result.timing),
+                },
+            )
+            return None, result
+
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="decrypt-transcode") as executor:
+        futures = {executor.submit(_run_one, prepared): prepared for prepared in pending}
+        for future in as_completed(futures):
+            prepared, result = future.result()
+            if prepared is not None:
+                completed_ids.add(id(prepared))
+            if result is not None:
+                failed_results.append(result)
+
+    pending_ids = {id(item) for item in pending}
+    kept_artifacts = [
+        item
+        for item in prepared_artifacts
+        if id(item) not in pending_ids or id(item) in completed_ids
+    ]
+    return kept_artifacts, failed_results
 
 
 def _normalize_final_target(desired_target: str, detected_container: str, *, transcode_enabled: bool) -> str:
@@ -943,6 +1046,18 @@ def run_batch(config: BatchRunConfig, adapter: PlatformAdapter) -> int:
                     "pending_files": [item.input_path.name for item in pending_transcode],
                 },
             )
+            prepared_artifacts, transcode_failures = _transcode_prepared_artifacts(
+                logger,
+                config,
+                prepared_artifacts,
+                sample_rate_hz=transcode_sample_rate_hz,
+                bitrate_kbps=transcode_bitrate_kbps,
+            )
+            for result in transcode_failures:
+                results.append(result)
+                _accumulate(timing_batch_total, result.timing)
+                failed_count += 1
+            should_transcode = False
 
     finalized_count = 0
     for prepared in prepared_artifacts:
