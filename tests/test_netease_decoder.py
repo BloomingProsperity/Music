@@ -141,3 +141,14 @@ def test_decode_ncm_file_rejects_invalid_header(tmp_path: pathlib.Path) -> None:
 
     with pytest.raises(NcmDecodeError):
         decode_ncm_file(bad_path, tmp_path / "out")
+
+
+def test_decode_ncm_file_rejects_unrecognized_payload_without_publishing_output(tmp_path: pathlib.Path) -> None:
+    payload = b"not an audio container" + bytes((index * 7 + 5) & 0xFF for index in range(128))
+    ncm_path = _ncm_fixture(tmp_path, payload)
+    output_dir = tmp_path / "out"
+
+    with pytest.raises(NcmDecodeError, match="unrecognized_audio_container"):
+        decode_ncm_file(ncm_path, output_dir)
+
+    assert not list(output_dir.glob("*"))

@@ -181,7 +181,9 @@ def decode_ncm_file(input_path: pathlib.Path, output_dir: pathlib.Path) -> dict:
             stream_decode_sec = round(time.perf_counter() - stream_started, 6)
 
             detected_container, recognition_stage = detect_audio_container(temp_output)
-            final_extension = detected_container if detected_container != "bin" else parsed.public.raw_format
+            if detected_container == "bin":
+                raise NcmDecodeError("unrecognized_audio_container")
+            final_extension = detected_container
             final_output = output_dir / f"{_output_basename(input_path)}.{final_extension}"
             if final_output.exists():
                 final_output.unlink()
