@@ -5,6 +5,7 @@ import pathlib
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox
 
 from src.Presentation.ui_app import MainWindow, build_stylesheet
@@ -336,7 +337,7 @@ def test_sidebar_shows_default_version_and_update_button() -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
 
     assert version is not None
-    assert version.text() == "0.13"
+    assert version.text() == "0.14"
     assert update_button is not None
     assert update_button.text() == "更新系统"
 
@@ -359,6 +360,27 @@ def test_update_button_shows_available_update_when_remote_is_newer(monkeypatch) 
     app.processEvents()
 
     assert update_button.text() == "已有版本更新"
+
+
+def test_startup_update_check_shows_available_update_without_long_delay(monkeypatch) -> None:
+    app = _app()
+
+    class Result:
+        ok = True
+        update_available = True
+        message = "available"
+
+    monkeypatch.setattr("src.Presentation.ui_app.check_update_availability", lambda _root_dir: Result())
+    monkeypatch.setattr("src.Presentation.ui_app.threading.Thread", _ImmediateThread)
+
+    window = MainWindow()
+    update_button = window.findChild(QPushButton, "UpdateButton")
+    assert update_button is not None
+
+    QTest.qWait(250)
+    app.processEvents()
+
+    assert update_button.text() == "\u5df2\u6709\u7248\u672c\u66f4\u65b0"
 
 
 def test_update_button_keeps_normal_text_when_no_update(monkeypatch) -> None:

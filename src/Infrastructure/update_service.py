@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -10,10 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
-APP_VERSION = "0.13"
+APP_VERSION = "0.14"
 VERSION_MARKER_FILE = ".qkk-version"
 UPDATE_REPO_URL = "https://github.com/BloomingProsperity/Music.git"
 UPDATE_BRANCH = "music-gateway"
+REMOTE_VERSION_FILE = "src/Infrastructure/update_service.py"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +136,19 @@ def _fetch_remote_revision_id() -> str:
     return _short_revision(first[0]) if first else ""
 
 
+def _fetch_remote_app_version() -> str:
+    branch = urllib.parse.quote(UPDATE_BRANCH, safe="")
+    raw_url = f"https://raw.githubusercontent.com/BloomingProsperity/Music/{branch}/{REMOTE_VERSION_FILE}"
+    try:
+        request = urllib.request.Request(raw_url, headers={"User-Agent": "QKKDecrypt"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            text = response.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    match = re.search(r'^\s*APP_VERSION\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
 def _read_local_version_marker(root_dir: pathlib.Path) -> str:
     marker_path = pathlib.Path(root_dir) / VERSION_MARKER_FILE
     try:
@@ -164,12 +179,18 @@ def check_update_availability(root_dir: pathlib.Path) -> UpdateAvailability:
             latest_revision="",
             message="暂时无法检查更新",
         )
+    latest_version = APP_VERSION
     update_available = current_revision != latest_revision
+    if not update_available:
+        remote_version = _fetch_remote_app_version()
+        if remote_version:
+            latest_version = remote_version
+            update_available = remote_version != APP_VERSION
     return UpdateAvailability(
         ok=True,
         update_available=update_available,
         current_version=APP_VERSION,
-        latest_version=APP_VERSION,
+        latest_version=latest_version,
         current_revision=current_revision,
         latest_revision=latest_revision,
         message="已有版本更新" if update_available else "已是最新版本",

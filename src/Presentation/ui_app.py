@@ -52,6 +52,8 @@ from src.Presentation.ui_state import (
 )
 
 
+UPDATE_CHECK_DELAY_MS = 100
+
 APP_BG = "#F7F8F6"
 PANEL_BG = "#FFFFFF"
 PANEL_ALT = "#FBF7F7"
@@ -421,7 +423,7 @@ class MainWindow(QWidget):
         self._connect()
         self._load_config()
         self._append_log("客户端已启动")
-        QTimer.singleShot(1200, self._start_update_check)
+        QTimer.singleShot(UPDATE_CHECK_DELAY_MS, self._start_update_check)
 
     def _build_ui(self) -> None:
         self.setWindowTitle("QKKDecrypt")
