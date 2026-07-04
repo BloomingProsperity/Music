@@ -115,6 +115,49 @@ def test_progress_advances_when_file_decrypted_event_arrives() -> None:
     assert window.current_file.text() == "当前文件 two.mflac"
 
 
+def test_file_finished_updates_progress_counts_immediately() -> None:
+    app = _app()
+    window = MainWindow()
+
+    window._handle_run_event("batch_started", {"candidate_count": 3})
+    window._handle_run_event(
+        "file_finished",
+        {
+            "index": 1,
+            "total": 3,
+            "result": "success",
+            "input_path": r"C:\music\one.mflac",
+        },
+    )
+    window._handle_run_event(
+        "file_finished",
+        {
+            "index": 2,
+            "total": 3,
+            "result": "failed",
+            "input_path": r"C:\music\two.mflac",
+            "reason": "decode failed",
+        },
+    )
+    window._handle_run_event(
+        "file_finished",
+        {
+            "index": 3,
+            "total": 3,
+            "result": "already_decrypted",
+            "input_path": r"C:\music\three.mflac",
+        },
+    )
+    app.processEvents()
+
+    assert window.progress.value() == 100
+    assert window.progress_label.text() == "进度 3 / 3"
+    assert window.success_label.text() == "成功 1"
+    assert window.failed_label.text() == "失败 1"
+    assert window.skipped_label.text() == "跳过 1"
+    assert window.current_file.text() == "当前文件 three.mflac"
+
+
 def test_sidebar_shows_default_version_and_update_button() -> None:
     _app()
     window = MainWindow()

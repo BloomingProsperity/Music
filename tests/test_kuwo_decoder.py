@@ -40,6 +40,34 @@ def test_decode_kwm_file_restores_wav_payload_with_fallback_key(tmp_path: pathli
     assert summary["key_source"] == "fallback_swap"
 
 
+def test_decode_kwm_file_uses_shared_xor_helper(tmp_path: pathlib.Path, monkeypatch) -> None:
+    key = bytes(range(1, 33))
+    payload = _wav_like_payload(32 * 468)
+    last_chunk_start = 32 * 467
+    swapped_key = _swap_halves(key)
+    payload[last_chunk_start:last_chunk_start + 32] = bytes(a ^ b for a, b in zip(swapped_key, key))
+    encrypted = _xor_with_key(bytes(payload), key)
+    kwm_path = tmp_path / "song.kwm"
+    kwm_path.write_bytes(b"\0" * 1024 + encrypted)
+    calls: list[tuple[int, int, int]] = []
+
+    def fake_xor(block: bytearray, key_bytes: bytes, start_offset: int) -> str:
+        calls.append((len(block), len(key_bytes), start_offset))
+        for index in range(len(block)):
+            block[index] ^= key_bytes[(start_offset + index) % len(key_bytes)]
+        return "fake"
+
+    monkeypatch.setattr("src.Infrastructure.kuwo_decoder.STREAM_CHUNK_SIZE", 37)
+    monkeypatch.setattr("src.Infrastructure.kuwo_decoder.xor_repeating_key_inplace", fake_xor)
+
+    summary = decode_kwm_file(kwm_path, tmp_path / "out")
+
+    assert pathlib.Path(summary["output_path"]).read_bytes() == bytes(payload)
+    assert len(calls) > 1
+    assert all(key_size == 32 for _, key_size, _ in calls)
+    assert [start for _, _, start in calls] == [index * 37 for index in range(len(calls))]
+
+
 def test_decode_kwm_file_rejects_too_small_files(tmp_path: pathlib.Path) -> None:
     kwm_path = tmp_path / "bad.kwm"
     kwm_path.write_bytes(b"short")

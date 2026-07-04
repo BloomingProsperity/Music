@@ -11,6 +11,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 from src.Infrastructure.transcoder import detect_audio_container
+from src.Infrastructure.xor_stream import xor_repeating_key_inplace
 
 
 MAGIC_HEADER = b"CTENFDAM"
@@ -109,11 +110,6 @@ def _build_key_box(key: bytes) -> bytes:
     return bytes(key_box)
 
 
-def _xor_music_into(block: bytearray, key_box: bytes, start_offset: int) -> None:
-    for index in range(len(block)):
-        block[index] ^= key_box[(start_offset + index) & 0xFF]
-
-
 def _output_basename(input_path: pathlib.Path) -> str:
     name = input_path.name
     return name[:-4] if name.lower().endswith(".ncm") else input_path.stem
@@ -179,7 +175,7 @@ def decode_ncm_file(input_path: pathlib.Path, output_dir: pathlib.Path) -> dict:
                     block = bytearray(source.read(STREAM_CHUNK_SIZE))
                     if not block:
                         break
-                    _xor_music_into(block, parsed.key_box, decoded_bytes)
+                    xor_repeating_key_inplace(block, parsed.key_box, decoded_bytes)
                     target.write(block)
                     decoded_bytes += len(block)
             stream_decode_sec = round(time.perf_counter() - stream_started, 6)

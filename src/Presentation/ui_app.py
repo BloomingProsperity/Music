@@ -365,6 +365,7 @@ class MainWindow(QWidget):
         self.running = False
         self.updating = False
         self.started_at = 0.0
+        self._run_counts = {"success": 0, "failed": 0, "skipped": 0}
         self.pages: dict[str, PlatformPage] = {}
         self.specs = platform_specs()
         self._build_ui()
@@ -645,13 +646,30 @@ class MainWindow(QWidget):
             self.bridge.update_finished.emit(ok)
 
     def _reset_progress(self) -> None:
+        self._reset_run_counts()
         self.progress.setValue(0)
         self.progress_label.setText("进度 0 / 0")
         self.current_file.setText("当前文件 -")
-        self.success_label.setText("成功 0")
-        self.failed_label.setText("失败 0")
-        self.skipped_label.setText("跳过 0")
+        self._render_run_counts()
         self.elapsed_label.setText("耗时 0.0s")
+
+    def _reset_run_counts(self) -> None:
+        self._run_counts = {"success": 0, "failed": 0, "skipped": 0}
+
+    def _render_run_counts(self) -> None:
+        self.success_label.setText(f"成功 {self._run_counts['success']}")
+        self.failed_label.setText(f"失败 {self._run_counts['failed']}")
+        self.skipped_label.setText(f"跳过 {self._run_counts['skipped']}")
+
+    def _record_file_result(self, result: str) -> None:
+        normalized = result.strip().lower()
+        if normalized == "success":
+            self._run_counts["success"] += 1
+        elif normalized in {"already_decrypted", "skipped"}:
+            self._run_counts["skipped"] += 1
+        elif normalized == "failed":
+            self._run_counts["failed"] += 1
+        self._render_run_counts()
 
     def _set_busy(self, busy: bool) -> None:
         for page in self.pages.values():
@@ -664,6 +682,8 @@ class MainWindow(QWidget):
         total = int(data.get("total") or data.get("candidate_count") or 0)
         index = int(data.get("index") or 0)
         if event_name == "batch_started":
+            self._reset_run_counts()
+            self._render_run_counts()
             self.progress.setValue(0)
             self.progress_label.setText(f"进度 0 / {total}")
             self._append_log(f"候选文件 {total}")
@@ -689,6 +709,9 @@ class MainWindow(QWidget):
                 self.progress.setValue(int(index / total * 100))
                 self.progress_label.setText(f"进度 {index} / {total}")
             name = pathlib.Path(str(data.get("input_path", data.get("output_path", "")))).name
+            if name:
+                self.current_file.setText(f"当前文件 {name}")
+            self._record_file_result(result)
             reason = str(data.get("reason") or result)
             self._append_log(f"{name}: {reason}")
             return
@@ -699,9 +722,12 @@ class MainWindow(QWidget):
             self.progress.setValue(100)
             count = int(data.get("candidate_count") or 0)
             self.progress_label.setText(f"进度 {count} / {count}")
-            self.success_label.setText(f"成功 {int(data.get('success_count') or 0)}")
-            self.failed_label.setText(f"失败 {int(data.get('failed_count') or 0)}")
-            self.skipped_label.setText(f"跳过 {int(data.get('skipped_count') or 0)}")
+            self._run_counts = {
+                "success": int(data.get("success_count") or 0),
+                "failed": int(data.get("failed_count") or 0),
+                "skipped": int(data.get("skipped_count") or 0),
+            }
+            self._render_run_counts()
             hotspot = data.get("timing_hotspot_stage") or {}
             if isinstance(hotspot, dict) and hotspot.get("stage"):
                 self._append_log(f"耗时热点 {hotspot.get('stage')} {_format_seconds(float(hotspot.get('total_sec') or 0.0))}")

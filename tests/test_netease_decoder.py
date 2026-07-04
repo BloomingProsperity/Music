@@ -113,6 +113,28 @@ def test_decode_ncm_file_restores_audio_payload_in_chunks(tmp_path: pathlib.Path
     assert summary["decoded_bytes"] == len(payload)
 
 
+def test_decode_ncm_file_uses_shared_xor_helper(tmp_path: pathlib.Path, monkeypatch) -> None:
+    payload = _wav_payload(128)
+    ncm_path = _ncm_fixture(tmp_path, payload)
+    calls: list[tuple[int, int, int]] = []
+
+    def fake_xor(block: bytearray, key: bytes, start_offset: int) -> str:
+        calls.append((len(block), len(key), start_offset))
+        for index in range(len(block)):
+            block[index] ^= key[(start_offset + index) % len(key)]
+        return "fake"
+
+    monkeypatch.setattr("src.Infrastructure.netease_decoder.STREAM_CHUNK_SIZE", 19)
+    monkeypatch.setattr("src.Infrastructure.netease_decoder.xor_repeating_key_inplace", fake_xor)
+
+    summary = decode_ncm_file(ncm_path, tmp_path / "out")
+
+    assert pathlib.Path(summary["output_path"]).read_bytes() == payload
+    assert len(calls) > 1
+    assert all(key_size == 256 for _, key_size, _ in calls)
+    assert [start for _, _, start in calls] == [index * 19 for index in range(len(calls))]
+
+
 def test_decode_ncm_file_rejects_invalid_header(tmp_path: pathlib.Path) -> None:
     bad_path = tmp_path / "bad.ncm"
     bad_path.write_bytes(b"not-ncm")

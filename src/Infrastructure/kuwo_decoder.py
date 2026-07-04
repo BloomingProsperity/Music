@@ -4,6 +4,7 @@ import pathlib
 import time
 
 from src.Infrastructure.transcoder import detect_audio_container
+from src.Infrastructure.xor_stream import xor_repeating_key_inplace
 
 
 HEADER_SIZE = 1024
@@ -49,11 +50,6 @@ def find_kwm_key(input_path: pathlib.Path) -> tuple[bytes, str]:
     return _swap_key_halves(last), "fallback_swap"
 
 
-def _xor_into(data: bytearray, key: bytes, start_offset: int) -> None:
-    for index in range(len(data)):
-        data[index] ^= key[(start_offset + index) & 31]
-
-
 def decode_kwm_file(input_path: pathlib.Path, output_dir: pathlib.Path) -> dict:
     started = time.perf_counter()
     input_path = input_path.expanduser().resolve()
@@ -70,7 +66,7 @@ def decode_kwm_file(input_path: pathlib.Path, output_dir: pathlib.Path) -> dict:
                 block = bytearray(source.read(STREAM_CHUNK_SIZE))
                 if not block:
                     break
-                _xor_into(block, key, decoded_bytes)
+                xor_repeating_key_inplace(block, key, decoded_bytes)
                 target.write(block)
                 decoded_bytes += len(block)
 
