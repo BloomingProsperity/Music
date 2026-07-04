@@ -61,15 +61,13 @@ class CliParserTests(unittest.TestCase):
                     "--qq-no-fetch-ekey",
                     "--qq-ekey-cache-dir",
                     str(root / "cache"),
-                    "--qq-legacy-frida",
                 ]
             )
 
         self.assertTrue(args.qq_no_fetch_ekey)
         self.assertEqual(args.qq_ekey_cache_dir, str(root / "cache"))
-        self.assertTrue(args.qq_legacy_frida)
 
-    def test_qq_decrypt_cli_does_not_require_admin_for_default_local_mode(self) -> None:
+    def test_qq_decrypt_cli_uses_local_mode_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)
             paths = _runtime_paths(root)
@@ -83,9 +81,7 @@ class CliParserTests(unittest.TestCase):
                 },
                 "qq": {
                     "format_rules": {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"},
-                    "qq_legacy_frida_enabled": False,
                 },
-                "kuwo": {},
                 "kugou": {},
                 "netease": {},
             }
@@ -93,7 +89,6 @@ class CliParserTests(unittest.TestCase):
             with (
                 mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
                 mock.patch.object(cli, "load_config", return_value=({}, config)),
-                mock.patch.object(cli, "is_running_as_admin", return_value=False),
                 mock.patch.object(cli, "_run_platform", return_value=0) as run_platform,
             ):
                 result = cli.main(["qq", "decrypt", "--input", str(root), "--output", str(root / "out")])

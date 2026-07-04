@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import argparse
-import ctypes
 import json
 import pathlib
 import sys
@@ -21,7 +20,6 @@ from src.Infrastructure.config_repository import (
     auto_find_kgg_db_path,
     auto_find_kugou_key,
     build_banner,
-    default_kuwo_signature_path,
     format_help_epilog,
     load_config,
     save_config,
@@ -36,14 +34,7 @@ from src.Infrastructure.platforms.registry import build_platform_adapter
 from src.Infrastructure.runtime_paths import RuntimePaths
 
 
-PLATFORM_LABELS = {"qq": "QQ音乐", "kuwo": "酷我音乐", "kugou": "酷狗音乐", "netease": "网易云音乐"}
-
-
-def is_running_as_admin() -> bool:
-    try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        return False
+PLATFORM_LABELS = {"qq": "QQ音乐", "kugou": "酷狗音乐", "netease": "网易云音乐"}
 
 
 def pause_exit(code: int = 0, message: str | None = None) -> int:
@@ -223,16 +214,13 @@ def _run_kugou_refresh_key_cli(paths: RuntimePaths, config: dict[str, Any], args
 def choose_platform() -> str:
     print("请选择平台:")
     print("1. QQ音乐")
-    print("2. 酷我音乐")
-    print("3. 酷狗音乐")
-    print("4. 网易云音乐")
+    print("2. 酷狗音乐")
+    print("3. 网易云音乐")
     mapping = {
         "1": "qq",
-        "2": "kuwo",
-        "3": "kugou",
-        "4": "netease",
+        "2": "kugou",
+        "3": "netease",
         "qq": "qq",
-        "kuwo": "kuwo",
         "kugou": "kugou",
         "netease": "netease",
         "wangyiyun": "netease",
@@ -292,53 +280,8 @@ def build_transcode_confirmation_resolver(
     return _resolver
 
 
-def _ensure_running_for_interactive(platform_id: str, adapter, settings: dict) -> tuple[bool, str | None]:
-    ok, reason = adapter.validate_runtime(settings)
-    if ok:
-        return True, None
-    print(f"未检测到{PLATFORM_LABELS[platform_id]}，请先开启对应软件。")
-    value = input("开启完成后输入 y 继续验证，否则按任意键退出: ").strip().lower()
-    if value != "y":
-        return False, reason or "user_cancelled"
-    ok, reason = adapter.validate_runtime(settings)
-    if ok:
-        return True, None
-    return False, reason or "target_process_not_detected"
-
-
 def _shared_recursive(config: dict) -> bool:
     return bool(config.get("shared", {}).get("recursive", True))
-
-
-def _require_admin(*, interactive: bool) -> int | None:
-    if is_running_as_admin():
-        return None
-    message = "请使用管理员身份启动 A_QKKd。当前不是管理员启动，已禁止继续使用。"
-    if interactive:
-        return pause_exit(2, message)
-    print(message, file=sys.stderr)
-    return 2
-
-
-def _settings_bool(settings: dict[str, Any], key: str, default: bool) -> bool:
-    value = settings.get(key, default)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-    return bool(value)
-
-
-def _decrypt_requires_admin(platform_id: str, settings: dict[str, Any]) -> bool:
-    if platform_id == "kuwo":
-        return True
-    if platform_id == "qq":
-        return _settings_bool(settings, "qq_legacy_frida_enabled", False)
-    return False
-
-
-def _decrypt_requires_runtime_validation(platform_id: str, adapter, settings: dict[str, Any]) -> bool:
-    if adapter.requires_running_process():
-        return True
-    return platform_id == "qq" and _settings_bool(settings, "qq_legacy_frida_enabled", False)
 
 
 def _validate_kugou_runtime(paths: RuntimePaths, config: dict, input_path: pathlib.Path, recursive: bool, interactive: bool) -> tuple[bool, str | None, dict]:
@@ -375,26 +318,12 @@ def _run_platform(platform_id: str, config: dict, *, input_override: str | None 
     input_path = pathlib.Path(input_override or settings.get("input_dir") or "")
     output_dir = pathlib.Path(output_override or shared.get("output_dir") or paths.output_dir)
     recursive = _shared_recursive(config) if recursive_override is None else recursive_override
-    admin_code = _require_admin(interactive=interactive) if _decrypt_requires_admin(platform_id, settings) else None
-    if admin_code is not None:
-        return admin_code
     if platform_id == "kugou":
         ok, reason, settings = _validate_kugou_runtime(paths, config, input_path, recursive, interactive)
         if not ok:
             if not interactive and reason:
                 print(reason, file=sys.stderr)
             return pause_exit(2, reason) if interactive else 2
-    elif _decrypt_requires_runtime_validation(platform_id, adapter, settings):
-        if interactive:
-            ok, reason = _ensure_running_for_interactive(platform_id, adapter, settings)
-            if not ok:
-                return pause_exit(2, reason)
-        else:
-            ok, reason = adapter.validate_runtime(settings)
-            if not ok:
-                if reason:
-                    print(reason, file=sys.stderr)
-                return 2
     config[platform_id].update(settings)
     batch_config = BatchRunConfig(
         platform_id=platform_id,
@@ -456,9 +385,6 @@ def run_interactive() -> int:
         rules["mgg"] = prompt_choice("mgg 输出格式 flac/m4a/mp3/wav", str(rules.get("mgg", "mp3")), supported_transcode_formats())
         rules["mmp4"] = prompt_choice("mmp4 输出格式 flac/m4a/mp3/wav", str(rules.get("mmp4", "mp3")), supported_transcode_formats())
         settings["format_rules"] = rules
-    elif platform_id == "kuwo":
-        settings["format_kwm"] = prompt_choice("kwm 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("format_kwm", "auto")), supported_transcode_formats())
-        settings["signature_file"] = str(default_kuwo_signature_path(paths))
     elif platform_id == "kugou":
         settings["target_format_kgma"] = prompt_choice("kgma/kgm/vpr 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("target_format_kgma", "auto")), supported_transcode_formats())
         settings["target_format_kgg"] = prompt_choice("kgg 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("target_format_kgg", "auto")), supported_transcode_formats())
@@ -498,7 +424,7 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
         epilog=format_help_epilog(paths),
     )
     sub = parser.add_subparsers(dest="platform")
-    for platform_id in ("qq", "kuwo", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease"):
         platform_parser = sub.add_parser(platform_id, help=f"{PLATFORM_LABELS[platform_id]} 解密")
         platform_sub = platform_parser.add_subparsers(dest="command")
         dec = platform_sub.add_parser("decrypt", help="执行解密")
@@ -511,11 +437,6 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
             dec.add_argument("--format-mmp4", choices=[item for item in supported_transcode_formats() if item != "auto"], help="mmp4 输出格式")
             dec.add_argument("--qq-no-fetch-ekey", action="store_true", help="只使用内嵌/缓存 ekey，不尝试从 QQ 音乐登录态补取")
             dec.add_argument("--qq-ekey-cache-dir", help="QQ ekey 缓存目录（建议放在用户数据目录，不要放项目内）")
-            dec.add_argument("--qq-legacy-frida", action="store_true", help="启用已弃用的 QQ 运行期 Frida 解密链")
-        elif platform_id == "kuwo":
-            dec.add_argument("--format-kwm", choices=supported_transcode_formats(), help="kwm 输出格式")
-            dec.add_argument("--exe-path", help="酷我 exe 路径")
-            dec.add_argument("--signature-file", help="酷我签名文件路径")
         elif platform_id == "kugou":
             dec.add_argument("--kgg-db", help="KGMusicV3.db 路径")
             dec.add_argument("--key-file", help="kugou_key.xz 路径")
@@ -590,17 +511,6 @@ def main(argv: list[str] | None = None) -> int:
             settings["qq_fetch_missing_ekey"] = False
         if getattr(args, "qq_ekey_cache_dir", None):
             settings["qq_ekey_cache_dir"] = args.qq_ekey_cache_dir
-        if getattr(args, "qq_legacy_frida", False):
-            settings["qq_legacy_frida_enabled"] = True
-    elif platform_id == "kuwo":
-        if args.format_kwm:
-            settings["format_kwm"] = validate_target_format(args.format_kwm)
-        if args.exe_path:
-            settings["exe_path"] = args.exe_path
-        if args.signature_file:
-            settings["signature_file"] = args.signature_file
-        elif not str(settings.get("signature_file", "")).strip():
-            settings["signature_file"] = str(default_kuwo_signature_path(paths))
     elif platform_id == "kugou":
         if args.kgg_db:
             settings["kgg_db_path"] = args.kgg_db

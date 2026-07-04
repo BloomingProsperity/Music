@@ -1,6 +1,6 @@
 ﻿<div align="center">
 
-# QKKDecrypt | QQ 酷狗酷我网易云音乐解密工具
+# QKKDecrypt | QQ 酷狗网易云音乐解密工具
 
 <img src="./封面/封面.png" width="320" alt="QKKDecrypt cover">
 
@@ -32,12 +32,9 @@
 - `QQ音乐`
   - 支持 `.mflac` / `.mgg` / `.mmp4`
   - 默认本地优先解码：优先使用文件内嵌 `ekey` 或本地缓存 `ekey`
-  - 缺少 `ekey` 时，可在有 QQ 音乐登录态的机器上补取并缓存；旧 Frida 运行期链默认关闭
+  - 缺少 `ekey` 时，本地算法无法凭空还原 key；可在有 QQ 音乐登录态的机器上补取并缓存后再本地解码
+  - 旧 Frida 运行期链已移除，不再要求为解密注入 QQ 音乐进程
   - 可输出 `mp3` / `flac` / `m4a` / `wav`，默认转为 `mp3 320 kbps`
-- `酷我音乐`
-  - 支持 `.kwm`
-  - 当前仍属于旧运行期解密链，需要酷我进程配合；后续优先弃用或替换为文件级实现
-  - 可输出 `auto` / `mp3` / `flac` / `m4a` / `wav`
 - `酷狗音乐`
   - 支持 `.kgm` / `.kgma` / `.kgg` / `.vpr` / `.kgm.flac` / `.vpr.flac`
   - 文件级离线解密，`.kgg` 需要本机 `KGMusicV3.db`

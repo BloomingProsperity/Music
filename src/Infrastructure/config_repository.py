@@ -10,14 +10,13 @@ from src.Infrastructure.transcoder import SUPPORTED_TARGET_FORMATS, normalize_ta
 
 CONFIG_NAMESPACE = "decrypt_cli"
 PROJECT_NAME_EN = "QKKDecrypt"
-PROJECT_NAME_ZH = "QQ酷狗酷我网易云音乐解密工具"
+PROJECT_NAME_ZH = "QQ酷狗网易云音乐解密工具"
 PROJECT_ADDRESS = "https://github.com/Acooldog/QQKWKG-TriMusicDecrypt"
 PROJECT_QQ = "2622138410"
 QQMUSIC_ATTRIBUTION = "QQ 音乐解密模型思路参考项目：qqmusic_decrypt（https://github.com/luyikk/qqmusic_decrypt）"
 LEGAL_NOTICE = "其他模型为自主逆向学习实现，仅供学习交流使用；禁止商用，禁止倒卖，倒卖者将举报平台并持续追责。\n格式说明：m4a/mp3/flac 支持补封面；m4a/wav 支持补专辑信息，均优先本地后网络。"
 FLET_NOTE = "main-ui 分支采用 PySide6。PySide6 基于 Qt for Python，桌面界面由本地 Qt 窗口和 Python 业务逻辑直接驱动。"
 DEFAULT_KUGOU_INPUT = pathlib.Path(r"O:\KuGou\KugouMusic")
-DEFAULT_KUWO_INPUT = pathlib.Path(r"C:\Users\01080\Documents\Frontier Developments\Planet Coaster\UserMusic\MusicPack")
 DEFAULT_QQ_INPUT = pathlib.Path("")
 DEFAULT_NETEASE_INPUT = pathlib.Path("")
 TRANSCODE_SAMPLE_RATE_OPTIONS = (22050, 32000, 44100, 48000, 88200, 96000)
@@ -88,19 +87,6 @@ def auto_find_kgg_db_path() -> pathlib.Path | None:
     return None
 
 
-def default_kuwo_signature_path(paths: RuntimePaths) -> pathlib.Path:
-    candidates = [
-        paths.bundle_dir / "src" / "Infrastructure" / "platforms" / "kuwo" / "runtime_m" / "out" / "recovered_signature.json",
-        paths.bundle_dir / "src" / "Infrastructure" / "platforms" / "kuwo" / "runtime_m" / "out" / "out" / "recovered_signature.json",
-        paths.root_dir / "src" / "Infrastructure" / "platforms" / "kuwo" / "runtime_m" / "out" / "recovered_signature.json",
-        paths.root_dir / "src" / "Infrastructure" / "platforms" / "kuwo" / "runtime_m" / "out" / "out" / "recovered_signature.json",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
-
-
 def _normalize_optional_config_int(value: Any) -> int | None:
     if value in (None, '', False):
         return None
@@ -146,27 +132,13 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
         "qq": {
             "input_dir": str(DEFAULT_QQ_INPUT),
             "output_dir": str(paths.output_dir / "qq"),
-            "process_match": "qqmusic",
             "embed_cover_art": True,
             "format_rules": dict(DEFAULT_QQ_FORMAT_RULES),
             "transcode_sample_rate_hz": None,
             "transcode_bitrate_kbps": 320,
             "auto_transcode_after_decode": True,
-            "qq_offline_musicex_enabled": True,
             "qq_fetch_missing_ekey": True,
             "qq_cache_ekeys": True,
-            "qq_legacy_frida_enabled": False,
-        },
-        "kuwo": {
-            "input_dir": str(DEFAULT_KUWO_INPUT),
-            "output_dir": str(paths.output_dir / "kuwo"),
-            "process_name": "kwmusic.exe",
-            "exe_path": "",
-            "signature_file": str(default_kuwo_signature_path(paths)),
-            "format_kwm": "auto",
-            "transcode_sample_rate_hz": None,
-            "transcode_bitrate_kbps": None,
-            "auto_transcode_after_decode": False,
         },
         "kugou": {
             "input_dir": str(DEFAULT_KUGOU_INPUT),
@@ -200,7 +172,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             ],
         },
     }
-    for section in ("shared", "qq", "kuwo", "kugou", "netease", "transcode_batch"):
+    for section in ("shared", "qq", "kugou", "netease", "transcode_batch"):
         value = payload.get(section)
         if isinstance(value, dict):
             config[section].update(value)
@@ -220,7 +192,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     config["shared"]["output_mode"] = shared_output_mode
 
     shared_output_dir = pathlib.Path(str(config["shared"].get("output_dir", paths.output_dir) or paths.output_dir))
-    for platform_id in ("qq", "kuwo", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease"):
         platform_output_dir = str(config[platform_id].get("output_dir", "") or "").strip()
         if not platform_output_dir:
             config[platform_id]["output_dir"] = str(shared_output_dir / platform_id)
@@ -263,24 +235,21 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     config["qq"]["format_rules"] = format_rules
     config["shared"]["cli_collision_policy"] = str(config["shared"].get("cli_collision_policy", "suffix") or "suffix").lower()
     config["shared"]["recursive"] = bool(config["shared"].get("recursive", True))
-    for platform_id in ("qq", "kuwo", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease"):
         auto_transcode = config[platform_id].get("auto_transcode_after_decode", False)
         if isinstance(auto_transcode, str):
             auto_transcode = auto_transcode.strip().lower() in {"1", "true", "yes", "y", "on"}
         else:
             auto_transcode = bool(auto_transcode)
         config[platform_id]["auto_transcode_after_decode"] = auto_transcode
-    config["kuwo"]["format_kwm"] = normalize_target_format(config["kuwo"].get("format_kwm", "auto"))
-    for platform_id in ("qq", "kuwo", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease"):
         config[platform_id]["transcode_sample_rate_hz"] = _normalize_optional_audio_choice(config[platform_id].get("transcode_sample_rate_hz"), TRANSCODE_SAMPLE_RATE_OPTIONS)
         config[platform_id]["transcode_bitrate_kbps"] = _normalize_optional_audio_choice(config[platform_id].get("transcode_bitrate_kbps"), TRANSCODE_BITRATE_OPTIONS)
     if config["qq"]["transcode_bitrate_kbps"] is None and "mp3" in set(config["qq"]["format_rules"].values()):
         config["qq"]["transcode_bitrate_kbps"] = 320
     for key, default in (
-        ("qq_offline_musicex_enabled", True),
         ("qq_fetch_missing_ekey", True),
         ("qq_cache_ekeys", True),
-        ("qq_legacy_frida_enabled", False),
     ):
         config["qq"][key] = _normalize_config_bool(config["qq"].get(key), default)
     config["kugou"]["target_format_kgma"] = normalize_target_format(config["kugou"].get("target_format_kgma", "auto"))

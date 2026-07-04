@@ -34,9 +34,9 @@ class ConfigRepositoryTests(unittest.TestCase):
             self.assertTrue(config["qq"]["auto_transcode_after_decode"])
             self.assertEqual(config["qq"]["transcode_bitrate_kbps"], 320)
             self.assertEqual(config["shared"]["transcode_max_workers"], 2)
-            self.assertTrue(config["qq"]["qq_offline_musicex_enabled"])
             self.assertTrue(config["qq"]["qq_fetch_missing_ekey"])
-            self.assertFalse(config["qq"]["qq_legacy_frida_enabled"])
+            self.assertTrue(config["qq"]["qq_cache_ekeys"])
+            self.assertNotIn("kuwo", config)
 
 
 if __name__ == "__main__":

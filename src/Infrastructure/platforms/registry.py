@@ -6,10 +6,6 @@ def build_platform_adapter(platform_id: str):
         from src.Infrastructure.platforms.qq.adapter import QQPlatformAdapter
 
         return QQPlatformAdapter()
-    if normalized == "kuwo":
-        from src.Infrastructure.platforms.kuwo.adapter import KuwoPlatformAdapter
-
-        return KuwoPlatformAdapter()
     if normalized == "kugou":
         from src.Infrastructure.platforms.kugou.adapter import KugouPlatformAdapter
 

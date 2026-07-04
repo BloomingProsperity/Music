@@ -19,7 +19,6 @@ const appName = "QKKDecrypt-UI";
 const pythonExe = resolvePythonExe(rootDir);
 const mainPy = path.join(rootDir, "main.py");
 const assetsDir = path.join(rootDir, "assets");
-const kuwoRuntimeDir = path.join(rootDir, "src", "Infrastructure", "platforms", "kuwo", "runtime_m");
 const qqNativeDir = path.join(rootDir, "src", "Infrastructure", "platforms", "qq", "native");
 const appIcon = path.join(rootDir, "封面", "封面.ico");
 
@@ -43,15 +42,12 @@ function ensureModule(moduleName, packageName = moduleName) {
 
 ensureFile(mainPy, "main entry");
 ensureDir(assetsDir, "assets directory");
-ensureDir(kuwoRuntimeDir, "kuwo runtime directory");
 ensureDir(qqNativeDir, "qq native directory");
 ensureFile(path.join(qqNativeDir, "qmc2_fast.c"), "qq qmc2 native source");
 buildOptionalQqNative(qqNativeDir);
 ensureFile(path.join(assetsDir, "kugou_key.xz"), "kugou_key.xz");
 ensureFile(path.join(assetsDir, "kudog_native.dll"), "kudog_native.dll");
 ensureFile(path.join(assetsDir, "ffmpeg-win-x86_64-v7.1.exe"), "bundled ffmpeg");
-ensureFile(path.join(kuwoRuntimeDir, "kwm_export_agent.js"), "kwm_export_agent.js");
-ensureFile(path.join(kuwoRuntimeDir, "out", "recovered_signature.json"), "kuwo recovered signature");
 ensureFile(appIcon, "application icon");
 
 ensureModule("PySide6", "PySide6");
@@ -141,8 +137,6 @@ const pyinstallerArgs = [
   "--collect-submodules",
   "src",
   "--collect-all",
-  "frida",
-  "--collect-all",
   "ncmdump",
   "--hidden-import",
   "shiboken6",
@@ -156,8 +150,6 @@ const pyinstallerArgs = [
   `${assetsDir};assets`,
   "--add-data",
   `${path.dirname(appIcon)};封面`,
-  "--add-data",
-  `${kuwoRuntimeDir};src/Infrastructure/platforms/kuwo/runtime_m`,
   "--add-data",
   `${qqNativeDir};src/Infrastructure/platforms/qq/native`,
   mainPy,
