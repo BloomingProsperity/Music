@@ -251,12 +251,13 @@ def test_validate_platform_runtime_for_ui_rejects_adapter_runtime_error(tmp_path
     assert result.reason == "missing key"
 
 
-def test_validate_platform_runtime_for_ui_rejects_kgg_without_database(tmp_path: pathlib.Path) -> None:
+def test_validate_platform_runtime_for_ui_rejects_kgg_without_database(tmp_path: pathlib.Path, monkeypatch) -> None:
     input_dir = tmp_path / "kgm"
     output_dir = tmp_path / "out"
     input_dir.mkdir()
     kgg_file = input_dir / "song.kgg"
     kgg_file.write_bytes(b"kgg")
+    monkeypatch.setattr("src.Presentation.ui_state.auto_find_kgg_db_path", lambda: None)
 
     result = validate_platform_runtime_for_ui(
         "kugou",

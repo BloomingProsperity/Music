@@ -84,13 +84,20 @@ class NeteasePlatformAdapter:
         final_work_path = pathlib.Path(dumped)
         detected_container, recognition_stage = detect_audio_container(final_work_path)
         elapsed = round(time.perf_counter() - started, 6)
+        metadata = getattr(ncm, "metadata", None)
+        metadata_json = getattr(metadata, "json", {})
+        if not isinstance(metadata_json, dict):
+            metadata_json = {}
         return {
+            "input_path": str(input_path),
             "output_path": str(final_work_path),
             "detected_container": detected_container,
             "final_extension": detected_container,
             "recognition_stage": recognition_stage,
             "backend": "python:ncmdump-py",
             "decoded_bytes": final_work_path.stat().st_size if final_work_path.exists() else 0,
+            "metadata": dict(metadata_json),
+            "metadata_type": str(getattr(metadata, "type", "music") or "music"),
             "timing": {
                 "header_parse_sec": 0.0,
                 "key_material_sec": 0.0,

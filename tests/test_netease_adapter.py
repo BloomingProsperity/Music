@@ -70,3 +70,54 @@ def test_netease_adapter_keeps_auto_when_metadata_format_is_unavailable(tmp_path
 
     assert adapter.predicted_extension(source, {"target_format_ncm": "auto"}) is None
     assert adapter.desired_target_format(source, {"target_format_ncm": "auto"}) == "auto"
+
+
+def test_netease_adapter_fallback_preserves_source_and_metadata(tmp_path: pathlib.Path, monkeypatch) -> None:
+    adapter = NeteasePlatformAdapter()
+    source = tmp_path / "song.ncm"
+    work_dir = tmp_path / "work"
+    log_dir = tmp_path / "log"
+    source.write_bytes(b"ncm")
+
+    class MusicMetadata:
+        format = "mp3"
+
+    class Metadata:
+        type = "music"
+        json = {
+            "format": "mp3",
+            "musicName": "Fallback Song",
+            "artist": [["Tester", 1]],
+            "album": "Fallback Album",
+        }
+
+    class FallbackNeteaseFile:
+        music_metadata = MusicMetadata()
+        metadata = Metadata()
+
+        def __init__(self, path: pathlib.Path) -> None:
+            self.path = path
+
+        def decrypt(self):
+            return self
+
+        def dump_music(self, output_hint: pathlib.Path) -> pathlib.Path:
+            output_path = pathlib.Path(output_hint).with_suffix(".mp3")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"ID3")
+            return output_path
+
+    monkeypatch.setattr(
+        "src.Infrastructure.platforms.netease.adapter.decode_ncm_file",
+        lambda _input_path, _work_dir: (_ for _ in ()).throw(RuntimeError("stream failed")),
+    )
+    monkeypatch.setattr("src.Infrastructure.platforms.netease.adapter.NeteaseCloudMusicFile", FallbackNeteaseFile)
+    monkeypatch.setattr("src.Infrastructure.platforms.netease.adapter.detect_audio_container", lambda _path: ("mp3", "fast_header"))
+
+    detail = adapter.decrypt_one(source, work_dir, {}, log_dir=log_dir)
+
+    assert detail["backend"] == "python:ncmdump-py"
+    assert detail["input_path"] == str(source)
+    assert detail["metadata_type"] == "music"
+    assert detail["metadata"]["musicName"] == "Fallback Song"
+    assert detail["metadata"]["artist"] == [["Tester", 1]]
