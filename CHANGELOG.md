@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.19 - 2026-07-04
+
+- QQ 缺少 ekey 时自动尝试启动本机 QQ 音乐；未检测到客户端时提示安装。
+
 ## 0.18 - 2026-07-04
 
 - 酷我默认输入目录优先识别 `C:\KwDownload\song`。

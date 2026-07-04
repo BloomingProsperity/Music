@@ -66,6 +66,7 @@ def test_build_qq_batch_config_preserves_paths_formats_and_transcode_options() -
         bitrate_kbps=320,
         qq_fetch_missing_ekey=False,
         qq_cache_ekeys=True,
+        platform_settings={"qq_auto_launch_client": True},
         format_rules={"mflac": "mp3", "mgg": "mp3", "mmp4": "m4a"},
     )
 
@@ -86,6 +87,7 @@ def test_build_qq_batch_config_preserves_paths_formats_and_transcode_options() -
     assert batch_config.settings["delete_source_after_success"] is True
     assert batch_config.settings["qq_fetch_missing_ekey"] is False
     assert batch_config.settings["qq_cache_ekeys"] is True
+    assert batch_config.settings["qq_auto_launch_client"] is True
 
 
 def test_build_qq_batch_config_does_not_cap_user_transcode_parallelism() -> None:

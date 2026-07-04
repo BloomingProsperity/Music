@@ -171,7 +171,8 @@ def validate_platform_runtime_for_ui(
 
 
 def build_qq_batch_config(options: PlatformRunOptions) -> BatchRunConfig:
-    settings: dict[str, Any] = {
+    settings: dict[str, Any] = dict(options.platform_settings)
+    settings.update({
         "format_rules": _normalize_format_rules(options.format_rules),
         "transcode_enabled": bool(options.transcode_enabled),
         "transcode_max_workers": _clamp_workers(options.transcode_max_workers),
@@ -184,7 +185,8 @@ def build_qq_batch_config(options: PlatformRunOptions) -> BatchRunConfig:
         "auto_transcode_after_decode": True,
         "qq_fetch_missing_ekey": bool(options.qq_fetch_missing_ekey),
         "qq_cache_ekeys": bool(options.qq_cache_ekeys),
-    }
+        "qq_auto_launch_client": bool(settings.get("qq_auto_launch_client", True)),
+    })
     return BatchRunConfig(
         platform_id="qq",
         input_path=options.input_path,

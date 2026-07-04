@@ -189,6 +189,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "auto_transcode_after_decode": True,
             "qq_fetch_missing_ekey": True,
             "qq_cache_ekeys": True,
+            "qq_auto_launch_client": True,
         },
         "kugou": {
             "input_dir": str(DEFAULT_KUGOU_INPUT),
@@ -310,6 +311,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     for key, default in (
         ("qq_fetch_missing_ekey", True),
         ("qq_cache_ekeys", True),
+        ("qq_auto_launch_client", True),
     ):
         config["qq"][key] = _normalize_config_bool(config["qq"].get(key), default)
     config["kugou"]["target_format_kgma"] = normalize_target_format(config["kugou"].get("target_format_kgma", "auto"))

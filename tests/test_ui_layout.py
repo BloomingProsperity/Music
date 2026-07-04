@@ -6,7 +6,7 @@ import pathlib
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox
+from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox
 
 from src.Presentation.ui_app import MainWindow, build_stylesheet
 
@@ -307,6 +307,25 @@ def test_file_finished_without_index_uses_recorded_counts_for_progress() -> None
     assert window.success_label.text() == "成功 1"
 
 
+def test_qq_client_required_failure_shows_one_clear_prompt(monkeypatch) -> None:
+    app = _app()
+    window = MainWindow()
+    prompts: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda _parent, title, text: prompts.append((title, text)))
+
+    payload = {
+        "result": "failed",
+        "input_path": r"C:\music\one.mflac",
+        "reason": "qq_client_required: 未检测到 QQ音乐客户端，请安装 QQ音乐后重试",
+    }
+    window._handle_run_event("file_finished", payload)
+    window._handle_run_event("file_finished", payload)
+    app.processEvents()
+
+    assert prompts == [("QQ音乐", "未检测到 QQ音乐客户端，请安装 QQ音乐后重试")]
+
+
 def test_batch_finished_accepts_total_jobs_payload() -> None:
     app = _app()
     window = MainWindow()
@@ -337,7 +356,7 @@ def test_sidebar_shows_default_version_and_update_button() -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
 
     assert version is not None
-    assert version.text() == "0.18"
+    assert version.text() == "0.19"
     assert update_button is not None
     assert update_button.text() == "更新系统"
 

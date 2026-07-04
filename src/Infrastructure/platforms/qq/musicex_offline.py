@@ -9,12 +9,15 @@ import logging
 import math
 import os
 import pathlib
+import shutil
 import struct
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Callable
 
 from src.Infrastructure.process_utils import find_process_by_name
 from src.Infrastructure.transcoder import fast_detect_container
@@ -458,6 +461,13 @@ def _settings_bool(settings: dict, key: str, default: bool) -> bool:
     return bool(value)
 
 
+def _settings_float(settings: dict, key: str, default: float) -> float:
+    try:
+        return float(settings.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
 def configure_windows_process_api(kernel32, psapi, memory_info_type=None) -> None:
     kernel32.OpenProcess.argtypes = [ctypes.wintypes.DWORD, ctypes.wintypes.BOOL, ctypes.wintypes.DWORD]
     kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
@@ -622,6 +632,116 @@ class QQMusicCookieProvider:
         return None
 
 
+class QQMusicClientLauncher:
+    def __init__(self) -> None:
+        self.last_action = ""
+
+    def launch(self) -> bool:
+        executable = self._find_executable()
+        if executable is None:
+            self.last_action = "install_required"
+            logger.info("QQ Music client launch skipped: QQMusic.exe not found")
+            return False
+        try:
+            subprocess.Popen(
+                [str(executable)],
+                cwd=str(executable.parent),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                **self._subprocess_window_kwargs(),
+            )
+        except OSError as exc:
+            self.last_action = "start_failed"
+            logger.info("QQ Music client launch failed: %s", exc)
+            return False
+        self.last_action = "started"
+        logger.info("QQ Music client launch requested: %s", executable)
+        return True
+
+    @classmethod
+    def _find_executable(cls) -> pathlib.Path | None:
+        process_path = cls._find_from_running_process()
+        if process_path is not None:
+            return process_path
+
+        from_path = shutil.which("QQMusic.exe")
+        if from_path:
+            candidate = pathlib.Path(from_path)
+            if candidate.exists():
+                return candidate
+
+        registry_path = cls._find_from_registry()
+        if registry_path is not None:
+            return registry_path
+
+        for candidate in cls._iter_common_candidates():
+            if candidate.exists():
+                return candidate
+        return None
+
+    @staticmethod
+    def _find_from_running_process() -> pathlib.Path | None:
+        try:
+            match = find_process_by_name("QQMusic")
+        except Exception:
+            return None
+        if match is None or not match.exe_path:
+            return None
+        candidate = pathlib.Path(match.exe_path)
+        return candidate if candidate.exists() else None
+
+    @staticmethod
+    def _iter_common_candidates() -> list[pathlib.Path]:
+        candidates: list[pathlib.Path] = []
+        for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+            root = os.environ.get(env_name)
+            if not root:
+                continue
+            root_path = pathlib.Path(root)
+            candidates.extend(
+                [
+                    root_path / "Tencent" / "QQMusic" / "QQMusic.exe",
+                    root_path / "QQMusic" / "QQMusic.exe",
+                    root_path / "Programs" / "Tencent" / "QQMusic" / "QQMusic.exe",
+                ]
+            )
+        return candidates
+
+    @staticmethod
+    def _find_from_registry() -> pathlib.Path | None:
+        if os.name != "nt":
+            return None
+        try:
+            import winreg
+        except ImportError:
+            return None
+
+        keys = (
+            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\App Paths\QQMusic.exe"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\App Paths\QQMusic.exe"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\QQMusic.exe"),
+        )
+        for hive, sub_key in keys:
+            try:
+                with winreg.OpenKey(hive, sub_key) as key:
+                    value, _ = winreg.QueryValueEx(key, "")
+            except OSError:
+                continue
+            candidate = pathlib.Path(str(value).strip('"'))
+            if candidate.exists():
+                return candidate
+        return None
+
+    @staticmethod
+    def _subprocess_window_kwargs() -> dict[str, object]:
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            return {"creationflags": subprocess.CREATE_NO_WINDOW, "startupinfo": startupinfo}
+        return {}
+
+
 class QQEKeyClient:
     def __init__(self, *, timeout_seconds: float = 15.0) -> None:
         self.timeout_seconds = timeout_seconds
@@ -685,12 +805,18 @@ class QQOfflineMusicExDecryptor:
         self,
         *,
         cookie_provider: QQMusicCookieProvider | None = None,
+        client_launcher: QQMusicClientLauncher | None = None,
         ekey_client: QQEKeyClient | None = None,
         cache_dir: pathlib.Path | None = None,
+        sleep_func: Callable[[float], None] | None = None,
     ) -> None:
         self.cookie_provider = cookie_provider or QQMusicCookieProvider()
+        self.client_launcher = client_launcher or QQMusicClientLauncher()
         self.ekey_client = ekey_client or QQEKeyClient()
         self.cache_dir = cache_dir or _default_ekey_cache_dir()
+        self._sleep = sleep_func or time.sleep
+        self._client_launch_attempted = False
+        self.last_client_assist_action = ""
 
     def decrypt_to_file(
         self,
@@ -762,11 +888,44 @@ class QQOfflineMusicExDecryptor:
 
         cookie_info = self.cookie_provider.get_cookie()
         if not cookie_info:
+            cookie_info = self._launch_client_and_get_cookie(settings)
+        if not cookie_info:
             return None
         ekey = self.ekey_client.fetch(meta.song_mid, meta.filename, cookie_info["cookie"], cookie_info["uin"])
         if ekey:
             self._cache_ekey(cache_key, ekey, settings)
         return ekey
+
+    def _launch_client_and_get_cookie(self, settings: dict) -> dict[str, str] | None:
+        if not _settings_bool(settings, "qq_auto_launch_client", True):
+            return None
+        if self._client_launch_attempted:
+            return None
+        self._client_launch_attempted = True
+        if not self.client_launcher.launch():
+            self.last_client_assist_action = getattr(self.client_launcher, "last_action", "") or "start_required"
+            return None
+
+        wait_seconds = max(0.0, _settings_float(settings, "qq_client_launch_wait_seconds", 8.0))
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            self._sleep(0.5)
+            cookie_info = self.cookie_provider.get_cookie()
+            if cookie_info:
+                return cookie_info
+            if time.monotonic() >= deadline:
+                self.last_client_assist_action = "login_required"
+                return None
+
+    def client_assist_message(self) -> str | None:
+        action = self.last_client_assist_action
+        if action == "install_required":
+            return "qq_client_required: 未检测到 QQ音乐客户端，请安装 QQ音乐后重试"
+        if action == "login_required":
+            return "qq_client_required: 已尝试启动 QQ音乐，请登录 QQ音乐后重试"
+        if action in {"start_failed", "start_required"}:
+            return "qq_client_required: 请启动并登录 QQ音乐后重试"
+        return None
 
     @staticmethod
     def _cache_key(meta: QQEncryptedTail) -> str:

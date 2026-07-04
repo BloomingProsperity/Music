@@ -412,6 +412,7 @@ class MainWindow(QWidget):
         self.updating = False
         self.update_available = False
         self.started_at = 0.0
+        self.client_hint_shown = False
         self._run_counts = {"success": 0, "failed": 0, "skipped": 0}
         self._run_total = 0
         self._decoded_inputs: set[str] = set()
@@ -712,6 +713,7 @@ class MainWindow(QWidget):
         self.stop_event.clear()
         self.running = True
         self.started_at = time.perf_counter()
+        self.client_hint_shown = False
         self._set_busy(True)
         self._reset_progress()
         self._append_log(f"{page.spec.title}: 开始")
@@ -958,6 +960,9 @@ class MainWindow(QWidget):
             self._set_run_progress(completed if completed else None, total)
             reason = str(data.get("reason") or result)
             self._append_log(f"{name}: {reason}")
+            if result == "failed" and "qq_client_required" in reason and not self.client_hint_shown:
+                self.client_hint_shown = True
+                QMessageBox.warning(self, "QQ音乐", reason.split(":", 1)[-1].strip() or "请安装或启动 QQ音乐后重试")
             return
         if event_name == "batch_transcode_started":
             pending = self._payload_int(data, "pending_count", "total_jobs")

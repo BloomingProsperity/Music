@@ -39,6 +39,7 @@ class ConfigRepositoryTests(unittest.TestCase):
             self.assertEqual(config["shared"]["transcode_max_workers"], 2)
             self.assertTrue(config["qq"]["qq_fetch_missing_ekey"])
             self.assertTrue(config["qq"]["qq_cache_ekeys"])
+            self.assertTrue(config["qq"]["qq_auto_launch_client"])
             self.assertFalse(config["shared"]["delete_source_after_success"])
             self.assertIn("kuwo", config)
             self.assertEqual(config["kuwo"]["input_dir"], "")

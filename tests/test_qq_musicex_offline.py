@@ -163,6 +163,138 @@ class QQMusicExOfflineTests(unittest.TestCase):
 
             self.assertIsNone(decryptor._resolve_ekey(meta, {"qq_fetch_missing_ekey": False}))
 
+    def test_missing_ekey_auto_launches_qqmusic_client_before_fetch(self) -> None:
+        class CookieProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def get_cookie(self):
+                self.calls += 1
+                if self.calls == 1:
+                    return None
+                return {"cookie": "uin=o123; qm_keyst=token", "uin": "123"}
+
+        class ClientLauncher:
+            def __init__(self):
+                self.calls = 0
+
+            def launch(self):
+                self.calls += 1
+                return True
+
+        class EKeyClient:
+            def __init__(self):
+                self.calls: list[tuple[str, str, str, str]] = []
+
+            def fetch(self, song_mid, filename, cookie, uin):
+                self.calls.append((song_mid, filename, cookie, uin))
+                return "fetched-ekey"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cookie_provider = CookieProvider()
+            client_launcher = ClientLauncher()
+            ekey_client = EKeyClient()
+            decryptor = musicex_offline.QQOfflineMusicExDecryptor(
+                cookie_provider=cookie_provider,
+                client_launcher=client_launcher,
+                ekey_client=ekey_client,
+                cache_dir=pathlib.Path(temp_dir),
+                sleep_func=lambda _seconds: None,
+            )
+            meta = QQEncryptedTail("musicex", "001song", "F0M000song.mflac", 1024)
+
+            ekey = decryptor._resolve_ekey(meta, {"qq_fetch_missing_ekey": True})
+
+        self.assertEqual(ekey, "fetched-ekey")
+        self.assertEqual(client_launcher.calls, 1)
+        self.assertEqual(cookie_provider.calls, 2)
+        self.assertEqual(
+            ekey_client.calls,
+            [("001song", "F0M000song.mflac", "uin=o123; qm_keyst=token", "123")],
+        )
+
+    def test_missing_ekey_auto_launch_can_be_disabled(self) -> None:
+        class CookieProvider:
+            def get_cookie(self):
+                return None
+
+        class ClientLauncher:
+            def launch(self):
+                raise AssertionError("QQ Music client should not be launched")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            decryptor = musicex_offline.QQOfflineMusicExDecryptor(
+                cookie_provider=CookieProvider(),
+                client_launcher=ClientLauncher(),
+                cache_dir=pathlib.Path(temp_dir),
+                sleep_func=lambda _seconds: None,
+            )
+            meta = QQEncryptedTail("musicex", "001song", "F0M000song.mflac", 1024)
+
+            ekey = decryptor._resolve_ekey(
+                meta,
+                {"qq_fetch_missing_ekey": True, "qq_auto_launch_client": False},
+            )
+
+        self.assertIsNone(ekey)
+
+    def test_missing_ekey_auto_launch_is_attempted_once_when_cookie_stays_missing(self) -> None:
+        class CookieProvider:
+            def get_cookie(self):
+                return None
+
+        class ClientLauncher:
+            def __init__(self):
+                self.calls = 0
+
+            def launch(self):
+                self.calls += 1
+                return True
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client_launcher = ClientLauncher()
+            decryptor = musicex_offline.QQOfflineMusicExDecryptor(
+                cookie_provider=CookieProvider(),
+                client_launcher=client_launcher,
+                cache_dir=pathlib.Path(temp_dir),
+                sleep_func=lambda _seconds: None,
+            )
+            first = QQEncryptedTail("musicex", "001song", "F0M000song.mflac", 1024)
+            second = QQEncryptedTail("musicex", "002song", "F0M000other.mflac", 1024)
+
+            self.assertIsNone(decryptor._resolve_ekey(first, {"qq_client_launch_wait_seconds": 0}))
+            self.assertIsNone(decryptor._resolve_ekey(second, {"qq_client_launch_wait_seconds": 0}))
+
+        self.assertEqual(client_launcher.calls, 1)
+
+    def test_client_launcher_uses_running_process_path_before_common_install_dirs(self) -> None:
+        class Match:
+            exe_path = r"D:\PortableApps\QQMusic\QQMusic.exe"
+
+        with (
+            mock.patch.object(musicex_offline, "find_process_by_name", return_value=Match()),
+            mock.patch.object(musicex_offline.shutil, "which", return_value=None),
+            mock.patch.object(musicex_offline.pathlib.Path, "exists", return_value=True),
+        ):
+            executable = musicex_offline.QQMusicClientLauncher._find_executable()
+
+        self.assertEqual(executable, pathlib.Path(r"D:\PortableApps\QQMusic\QQMusic.exe"))
+
+    def test_client_launcher_only_reports_install_required_when_client_is_missing(self) -> None:
+        calls: list[list[str]] = []
+
+        with (
+            mock.patch.object(musicex_offline.QQMusicClientLauncher, "_find_executable", return_value=None),
+            mock.patch.object(musicex_offline.shutil, "which", return_value=r"C:\Windows\System32\winget.exe"),
+            mock.patch.object(musicex_offline.subprocess, "Popen", side_effect=lambda command, **_kwargs: calls.append(list(command))),
+        ):
+            launcher = musicex_offline.QQMusicClientLauncher()
+            launched = launcher.launch()
+
+        self.assertFalse(launched)
+        self.assertEqual(launcher.last_action, "install_required")
+        self.assertEqual(calls, [])
+
     def test_relative_ekey_cache_dir_override_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             default_cache = pathlib.Path(temp_dir) / "default-cache"

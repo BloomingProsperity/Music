@@ -20,8 +20,8 @@ from src.Infrastructure.update_service import (
 )
 
 
-def test_app_version_defaults_to_v018() -> None:
-    assert APP_VERSION == "0.18"
+def test_app_version_defaults_to_v019() -> None:
+    assert APP_VERSION == "0.19"
 
 
 def test_resolve_app_version_includes_git_commit_when_available(tmp_path: pathlib.Path, monkeypatch) -> None:
@@ -32,26 +32,26 @@ def test_resolve_app_version_includes_git_commit_when_available(tmp_path: pathli
 
     monkeypatch.setattr("src.Infrastructure.update_service.subprocess.run", fake_run)
 
-    assert resolve_app_version(tmp_path) == "0.18"
+    assert resolve_app_version(tmp_path) == "0.19"
 
 
 def test_resolve_app_version_uses_local_update_marker_without_git(tmp_path: pathlib.Path) -> None:
     (tmp_path / ".qkk-version").write_text("20260704163300", encoding="utf-8")
 
-    assert resolve_app_version(tmp_path) == "0.18"
+    assert resolve_app_version(tmp_path) == "0.19"
 
 
 def test_check_update_availability_reports_new_remote_revision(tmp_path: pathlib.Path, monkeypatch) -> None:
     (tmp_path / ".qkk-version").write_text("abc1234\n", encoding="utf-8")
     monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_revision_id", lambda: "def5678")
-    monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_app_version", lambda: "0.18", raising=False)
+    monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_app_version", lambda: "0.19", raising=False)
 
     result = check_update_availability(tmp_path)
 
     assert result.ok is True
     assert result.update_available is True
-    assert result.current_version == "0.18"
-    assert result.latest_version == "0.18"
+    assert result.current_version == "0.19"
+    assert result.latest_version == "0.19"
     assert result.current_revision == "abc1234"
     assert result.latest_revision == "def5678"
 
@@ -59,7 +59,7 @@ def test_check_update_availability_reports_new_remote_revision(tmp_path: pathlib
 def test_check_update_availability_reports_current_when_revisions_match(tmp_path: pathlib.Path, monkeypatch) -> None:
     (tmp_path / ".qkk-version").write_text("abc1234\n", encoding="utf-8")
     monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_revision_id", lambda: "abc1234")
-    monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_app_version", lambda: "0.18", raising=False)
+    monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_app_version", lambda: "0.19", raising=False)
 
     result = check_update_availability(tmp_path)
 
@@ -73,14 +73,14 @@ def test_check_update_availability_reports_new_remote_version_when_marker_matche
     (tmp_path / ".qkk-version").write_text("abc1234\n", encoding="utf-8")
     monkeypatch.setattr("src.Infrastructure.update_service.APP_VERSION", "0.14")
     monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_revision_id", lambda: "abc1234")
-    monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_app_version", lambda: "0.18", raising=False)
+    monkeypatch.setattr("src.Infrastructure.update_service._fetch_remote_app_version", lambda: "0.19", raising=False)
 
     result = check_update_availability(tmp_path)
 
     assert result.ok is True
     assert result.update_available is True
     assert result.current_version == "0.14"
-    assert result.latest_version == "0.18"
+    assert result.latest_version == "0.19"
 
 
 def test_build_update_command_prefers_git_checkout(tmp_path: pathlib.Path) -> None:
@@ -461,7 +461,7 @@ def test_run_update_reports_missing_update_entry(tmp_path: pathlib.Path) -> None
     result = run_update(tmp_path)
 
     assert result.ok is False
-    assert result.message == "暂时无法自动更新。当前版本 0.18，请重新安装最新版本。"
+    assert result.message == "暂时无法自动更新。当前版本 0.19，请重新安装最新版本。"
 
 
 def test_run_update_executes_command_and_keeps_ui_message_clean(tmp_path: pathlib.Path, monkeypatch) -> None:
@@ -475,7 +475,7 @@ def test_run_update_executes_command_and_keeps_ui_message_clean(tmp_path: pathli
     result = run_update(tmp_path)
 
     assert result.ok is True
-    assert result.message == "更新完成，当前版本 0.18，正在准备重启。"
+    assert result.message == "更新完成，当前版本 0.19，正在准备重启。"
     assert "updated" not in result.message
     assert (tmp_path / ".qkk-version").exists()
 

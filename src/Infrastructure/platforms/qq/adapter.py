@@ -66,16 +66,20 @@ class QQPlatformAdapter:
         default_ext = RAW_CONTAINER_RULES.get(source_suffix, 'flac')
         final_work_path = work_dir / f"{input_path.stem}.{default_ext}"
 
-        offline_detail = self._ensure_offline_decryptor().decrypt_to_file(
+        decryptor = self._ensure_offline_decryptor()
+        offline_detail = decryptor.decrypt_to_file(
             input_path,
             final_work_path,
             settings,
             log_dir=log_dir,
         )
         if offline_detail is None:
+            assist_message_getter = getattr(decryptor, "client_assist_message", None)
+            assist_message = assist_message_getter() if callable(assist_message_getter) else None
             raise RuntimeError(
-                'qq_local_ekey_missing: QQ 本地解码缺少可用 ekey；'
-                '请先缓存该文件 ekey，或临时打开 QQ 音乐补取 key 后重试'
+                assist_message
+                or 'qq_local_ekey_missing: QQ 本地解码缺少可用 ekey；'
+                '请先缓存该文件 ekey，或启动并登录 QQ 音乐补取 key 后重试'
             )
 
         elapsed = round(time.perf_counter() - started, 6)
