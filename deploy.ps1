@@ -1,12 +1,15 @@
 param(
     [string]$InstallDir = "$env:USERPROFILE\QKKDecrypt",
     [string]$RepoZipUrl = "https://github.com/BloomingProsperity/Music/archive/refs/heads/music-gateway.zip",
+    [string]$TreeApiUrl = "",
     [switch]$NoLaunch,
-    [switch]$NoShortcut
+    [switch]$NoShortcut,
+    [switch]$SkipDependencyInstall
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$Branch = "music-gateway"
 
 function Write-Step {
     param([string]$Message)
@@ -16,6 +19,24 @@ function Write-Step {
 function Write-Ok {
     param([string]$Message)
     Write-Host "[QKK] $Message" -ForegroundColor Green
+}
+
+function Set-Utf8NoBomContent {
+    param(
+        [string]$Path,
+        [string]$Value
+    )
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Value, $encoding)
+}
+
+function Get-ShortRevision {
+    param([string]$Value)
+    $normalized = -join (($Value.Trim().ToCharArray() | Where-Object { [char]::IsLetterOrDigit($_) -or $_ -in @('.', '-', '_') }))
+    if ($normalized.Length -ge 12 -and $normalized.Substring(0, 12) -match '^[0-9a-fA-F]{12}$') {
+        return $normalized.Substring(0, 7)
+    }
+    return $normalized
 }
 
 function Find-Python {
@@ -80,7 +101,7 @@ function Copy-SourceTree {
 
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
     $excludeDirs = @(".git", ".venv", "build", "dist", "_log", "_output", "__pycache__", ".pytest_cache")
-    $excludeFiles = @("config.json")
+    $excludeFiles = @("config.json", ".qkk-version", ".qkk-update-manifest.json")
     $args = @(
         $SourceDir,
         $TargetDir,
@@ -121,17 +142,83 @@ function New-DesktopShortcut {
 }
 
 function Get-RemoteRevisionId {
-    param([string]$Branch = "music-gateway")
+    param([string]$BranchName = $Branch)
     try {
-        $encodedBranch = [uri]::EscapeDataString($Branch)
+        $encodedBranch = [uri]::EscapeDataString($BranchName)
         $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/BloomingProsperity/Music/commits/$encodedBranch" -UseBasicParsing
         if ($commit.sha) {
-            return $commit.sha.Substring(0, [Math]::Min(7, $commit.sha.Length))
+            return Get-ShortRevision $commit.sha
         }
     }
     catch {
     }
     return (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+}
+
+function Get-DefaultTreeApiUrl {
+    $encodedBranch = [uri]::EscapeDataString($Branch)
+    return "https://api.github.com/repos/BloomingProsperity/Music/git/trees/$encodedBranch`?recursive=1"
+}
+
+function Test-IsExcludedManifestPath {
+    param([string]$RelativePath)
+    $normalized = $RelativePath -replace "\\", "/"
+    $excludedPrefixes = @(
+        ".git/",
+        ".venv/",
+        ".pytest_cache/",
+        "__pycache__/",
+        "_log/",
+        "_work/",
+        "build/",
+        "dist/",
+        "output/",
+        "plugins/"
+    )
+    foreach ($prefix in $excludedPrefixes) {
+        if ($normalized.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $normalized -in @("config.json", ".qkk-version", ".qkk-update-manifest.json")
+}
+
+function Write-UpdateManifestFromRemoteTree {
+    param([string]$TargetDir)
+    if (-not $TreeApiUrl) {
+        $script:TreeApiUrl = Get-DefaultTreeApiUrl
+    }
+    try {
+        $tree = Invoke-RestMethod -Uri $TreeApiUrl -UseBasicParsing
+        if (-not $tree.tree) {
+            return ""
+        }
+        $files = [ordered]@{}
+        foreach ($entry in $tree.tree) {
+            if ([string]$entry.type -ne "blob") {
+                continue
+            }
+            $relativePath = ([string]$entry.path) -replace "\\", "/"
+            if (-not $relativePath -or (Test-IsExcludedManifestPath $relativePath)) {
+                continue
+            }
+            $files[$relativePath] = [string]$entry.sha
+        }
+        $revision = Get-ShortRevision ([string]$tree.sha)
+        if (-not $revision) {
+            $revision = Get-RemoteRevisionId
+        }
+        $manifest = [ordered]@{
+            branch = $Branch
+            revision = $revision
+            files = $files
+        }
+        Set-Utf8NoBomContent -Path (Join-Path $TargetDir ".qkk-update-manifest.json") -Value (($manifest | ConvertTo-Json -Depth 5) + "`n")
+        return $revision
+    }
+    catch {
+        return ""
+    }
 }
 
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
@@ -155,25 +242,34 @@ try {
 
     Write-Step "Syncing source files"
     Copy-SourceTree -SourceDir $SourceRoot.FullName -TargetDir $InstallDir
-    Set-Content -LiteralPath (Join-Path $InstallDir ".qkk-version") -Value (Get-RemoteRevisionId) -Encoding UTF8
+    $Revision = Write-UpdateManifestFromRemoteTree -TargetDir $InstallDir
+    if (-not $Revision) {
+        $Revision = Get-RemoteRevisionId
+    }
+    Set-Utf8NoBomContent -Path (Join-Path $InstallDir ".qkk-version") -Value ($Revision + "`n")
 
-    $Python = Ensure-Python
     $VenvDir = Join-Path $InstallDir ".venv"
     $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
-    if (-not (Test-Path $VenvPython)) {
-        Write-Step "Creating virtual environment"
-        Invoke-Python -Python $Python -ArgumentList @("-m", "venv", $VenvDir)
-    }
+    if (-not $SkipDependencyInstall) {
+        $Python = Ensure-Python
+        if (-not (Test-Path $VenvPython)) {
+            Write-Step "Creating virtual environment"
+            Invoke-Python -Python $Python -ArgumentList @("-m", "venv", $VenvDir)
+        }
 
-    Write-Step "Installing Python dependencies"
-    & $VenvPython -m pip install --upgrade pip
-    if ($LASTEXITCODE -ne 0) {
-        throw "pip upgrade failed"
+        Write-Step "Installing Python dependencies"
+        & $VenvPython -m pip install --upgrade pip
+        if ($LASTEXITCODE -ne 0) {
+            throw "pip upgrade failed"
+        }
+        & $VenvPython -m pip install -r (Join-Path $InstallDir "requirements.txt")
+        if ($LASTEXITCODE -ne 0) {
+            throw "dependency installation failed"
+        }
     }
-    & $VenvPython -m pip install -r (Join-Path $InstallDir "requirements.txt")
-    if ($LASTEXITCODE -ne 0) {
-        throw "dependency installation failed"
+    else {
+        Write-Step "Skipping Python dependency installation"
     }
 
     $Ffmpeg = Join-Path $InstallDir "assets\ffmpeg-win-x86_64-v7.1.exe"
@@ -191,6 +287,9 @@ try {
     Write-Host "Run later: powershell -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\run-ui.ps1`""
 
     if (-not $NoLaunch) {
+        if ($SkipDependencyInstall -and -not (Test-Path $VenvPython)) {
+            throw "Cannot launch UI because dependency installation was skipped."
+        }
         Write-Step "Starting UI"
         Start-Process -FilePath $VenvPython -ArgumentList "`"$InstallDir\ui_main.py`"" -WorkingDirectory $InstallDir
     }
