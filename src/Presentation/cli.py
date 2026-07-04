@@ -34,7 +34,7 @@ from src.Infrastructure.platforms.registry import build_platform_adapter
 from src.Infrastructure.runtime_paths import RuntimePaths
 
 
-PLATFORM_LABELS = {"qq": "QQ音乐", "kugou": "酷狗音乐", "netease": "网易云音乐"}
+PLATFORM_LABELS = {"qq": "QQ音乐", "kugou": "酷狗音乐", "netease": "网易云音乐", "kuwo": "酷我音乐"}
 
 
 def pause_exit(code: int = 0, message: str | None = None) -> int:
@@ -216,14 +216,17 @@ def choose_platform() -> str:
     print("1. QQ音乐")
     print("2. 酷狗音乐")
     print("3. 网易云音乐")
+    print("4. 酷我音乐")
     mapping = {
         "1": "qq",
         "2": "kugou",
         "3": "netease",
+        "4": "kuwo",
         "qq": "qq",
         "kugou": "kugou",
         "netease": "netease",
         "wangyiyun": "netease",
+        "kuwo": "kuwo",
     }
     value = input("平台 [1]: ").strip().lower() or "1"
     return mapping.get(value, "")
@@ -403,8 +406,10 @@ def run_interactive() -> int:
                 print(f"已更新 kugou_key.xz：{result.output_path}")
             except Exception as exc:
                 print(f"抓取 kugou_key.xz 失败：{exc}")
-    else:
+    elif platform_id == "netease":
         settings["target_format_ncm"] = prompt_choice("ncm 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("target_format_ncm", "auto")), supported_transcode_formats())
+    elif platform_id == "kuwo":
+        settings["target_format_kwm"] = prompt_choice("kwm 输出格式 auto/flac/m4a/mp3/wav", str(settings.get("target_format_kwm", "auto")), supported_transcode_formats())
 
     config[platform_id].update(settings)
     config["shared"].update(shared)
@@ -424,7 +429,7 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
         epilog=format_help_epilog(paths),
     )
     sub = parser.add_subparsers(dest="platform")
-    for platform_id in ("qq", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease", "kuwo"):
         platform_parser = sub.add_parser(platform_id, help=f"{PLATFORM_LABELS[platform_id]} 解密")
         platform_sub = platform_parser.add_subparsers(dest="command")
         dec = platform_sub.add_parser("decrypt", help="执行解密")
@@ -444,8 +449,10 @@ def build_parser(paths: RuntimePaths) -> argparse.ArgumentParser:
             dec.add_argument("--format-kgg", choices=supported_transcode_formats(), help="kgg 输出格式")
             refresh_key = platform_sub.add_parser("refresh-key", help="抓取最新的 kugou_key.xz")
             refresh_key.add_argument("--output", help="保存新的 kugou_key.xz 路径")
-        else:
+        elif platform_id == "netease":
             dec.add_argument("--format-ncm", choices=supported_transcode_formats(), help="ncm 输出格式")
+        elif platform_id == "kuwo":
+            dec.add_argument("--format-kwm", choices=supported_transcode_formats(), help="kwm 输出格式")
         cover_group = dec.add_mutually_exclusive_group()
         cover_group.add_argument("--embed-cover", dest="embed_cover_art", action="store_true", help="自动补封面（所有平台共用），可能会导致转换变慢")
         cover_group.add_argument("--no-embed-cover", dest="embed_cover_art", action="store_false", help="不自动补封面")
@@ -520,9 +527,12 @@ def main(argv: list[str] | None = None) -> int:
             settings["target_format_kgma"] = validate_target_format(args.format_kgma)
         if args.format_kgg:
             settings["target_format_kgg"] = validate_target_format(args.format_kgg)
-    else:
+    elif platform_id == "netease":
         if args.format_ncm:
             settings["target_format_ncm"] = validate_target_format(args.format_ncm)
+    elif platform_id == "kuwo":
+        if args.format_kwm:
+            settings["target_format_kwm"] = validate_target_format(args.format_kwm)
     config[platform_id].update(settings)
     recursive = not args.no_recursive
     return _run_platform(platform_id, config, input_override=args.input, output_override=args.output, recursive_override=recursive, interactive=False)

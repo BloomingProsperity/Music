@@ -36,7 +36,13 @@ class ConfigRepositoryTests(unittest.TestCase):
             self.assertEqual(config["shared"]["transcode_max_workers"], 2)
             self.assertTrue(config["qq"]["qq_fetch_missing_ekey"])
             self.assertTrue(config["qq"]["qq_cache_ekeys"])
-            self.assertNotIn("kuwo", config)
+            self.assertIn("kuwo", config)
+            self.assertEqual(config["kuwo"]["input_dir"], "")
+            self.assertEqual(config["kuwo"]["output_dir"], str(pathlib.Path(temp_dir) / "output" / "kuwo"))
+            self.assertEqual(config["kuwo"]["target_format_kwm"], "auto")
+            self.assertFalse(config["kuwo"]["auto_transcode_after_decode"])
+            self.assertIsNone(config["kuwo"]["transcode_sample_rate_hz"])
+            self.assertIsNone(config["kuwo"]["transcode_bitrate_kbps"])
 
 
 if __name__ == "__main__":

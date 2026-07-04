@@ -42,12 +42,13 @@ from src.Infrastructure.config_repository import (
 )
 from src.Infrastructure.platforms.registry import build_platform_adapter
 from src.Infrastructure.runtime_paths import RuntimePaths
+from src.Infrastructure.update_service import APP_VERSION, run_update
 from src.Presentation.ui_state import (
     PlatformRunOptions,
     PlatformSpec,
-    build_qq_batch_config,
+    build_platform_batch_config,
     platform_specs,
-    validate_writable_output_dir,
+    validate_platform_runtime_for_ui,
 )
 
 
@@ -75,6 +76,7 @@ class UiBridge(QObject):
     event_received = Signal(str, object)
     run_finished = Signal(int)
     log_message = Signal(str)
+    update_finished = Signal(bool)
 
 
 class PathRow(QWidget):
@@ -306,7 +308,10 @@ class PlatformPage(QWidget):
     def _update_responsive_layout(self) -> None:
         if not hasattr(self, "form_scroll"):
             return
-        viewport_width = self.form_scroll.viewport().width()
+        try:
+            viewport_width = self.form_scroll.viewport().width()
+        except RuntimeError:
+            return
         if viewport_width <= 0:
             return
         margins = self.form_layout.contentsMargins()
@@ -358,6 +363,7 @@ class MainWindow(QWidget):
         self.bridge = UiBridge()
         self.stop_event = threading.Event()
         self.running = False
+        self.updating = False
         self.started_at = 0.0
         self.pages: dict[str, PlatformPage] = {}
         self.specs = platform_specs()
@@ -396,6 +402,15 @@ class MainWindow(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, spec.platform_id)
             self.platform_list.addItem(item)
         side_layout.addWidget(self.platform_list, 1)
+        self.version_label = QLabel(APP_VERSION)
+        self.version_label.setObjectName("AppVersion")
+        self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.update_button = QPushButton("更新系统")
+        self.update_button.setObjectName("UpdateButton")
+        self.update_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_button.setFixedHeight(34)
+        side_layout.addWidget(self.version_label)
+        side_layout.addWidget(self.update_button)
         root.addWidget(sidebar)
 
         content = QVBoxLayout()
@@ -468,9 +483,11 @@ class MainWindow(QWidget):
         for page in self.pages.values():
             page.start_requested.connect(self._start_platform)
         self.stop_button.clicked.connect(self._stop_run)
+        self.update_button.clicked.connect(self._start_update)
         self.bridge.event_received.connect(self._handle_run_event)
         self.bridge.run_finished.connect(self._handle_run_finished)
         self.bridge.log_message.connect(self._append_log)
+        self.bridge.update_finished.connect(self._handle_update_finished)
 
     def _load_config(self) -> None:
         shared = self.config.get("shared", {})
@@ -502,7 +519,7 @@ class MainWindow(QWidget):
         kuwo_page = self.pages["kuwo"]
         kuwo_page.output_dir.set_text(str(self.paths.output_dir / "kuwo"))
 
-    def _save_qq_config(self, page: PlatformPage) -> None:
+    def _save_platform_config(self, platform_id: str, page: PlatformPage) -> None:
         self.root_config, self.config = load_config(self.paths)
         self.config["shared"]["output_dir"] = page.output_dir.text() or str(self.paths.output_dir)
         self.config["shared"]["recursive"] = page.recursive.isChecked()
@@ -510,22 +527,28 @@ class MainWindow(QWidget):
         self.config["shared"]["transcode_max_workers"] = page.workers.value()
         self.config["shared"]["embed_cover_art"] = page.cover.isChecked()
         self.config["shared"]["supplement_album_metadata"] = page.album.isChecked()
-        self.config["qq"]["input_dir"] = page.input_path.text()
-        self.config["qq"]["output_dir"] = page.output_dir.text()
-        self.config["qq"]["format_rules"] = page.format_values()
-        self.config["qq"]["transcode_sample_rate_hz"] = page.sample_rate_value()
-        self.config["qq"]["transcode_bitrate_kbps"] = page.bitrate_value()
-        self.config["qq"]["qq_fetch_missing_ekey"] = page.fetch_ekey.isChecked()
-        self.config["qq"]["qq_cache_ekeys"] = page.cache_ekey.isChecked()
+        platform_config = self.config.setdefault(platform_id, {})
+        platform_config["input_dir"] = page.input_path.text()
+        platform_config["output_dir"] = page.output_dir.text()
+        if platform_id == "qq":
+            platform_config["format_rules"] = page.format_values()
+            platform_config["qq_fetch_missing_ekey"] = page.fetch_ekey.isChecked()
+            platform_config["qq_cache_ekeys"] = page.cache_ekey.isChecked()
+        else:
+            platform_config.update(page.format_values())
+        platform_config["transcode_sample_rate_hz"] = page.sample_rate_value()
+        platform_config["transcode_bitrate_kbps"] = page.bitrate_value()
         save_config(self.paths, self.root_config, self.config)
 
     def _start_platform(self, platform_id: str) -> None:
-        if platform_id != "qq":
-            self._append_log(f"{self.pages[platform_id].spec.title}: 暂不可用")
+        if platform_id not in self.pages:
+            return
+        page = self.pages[platform_id]
+        if not page.spec.enabled:
+            self._append_log(f"{page.spec.title}: 暂不可用")
             return
         if self.running:
             return
-        page = self.pages["qq"]
         input_text = page.input_path.text()
         output_text = page.output_dir.text()
         if not input_text:
@@ -536,21 +559,31 @@ class MainWindow(QWidget):
             return
         input_path = pathlib.Path(input_text)
         output_dir = pathlib.Path(output_text)
-        if not input_path.exists():
-            QMessageBox.warning(self, "输入路径", "输入路径不存在")
+        adapter = build_platform_adapter(platform_id)
+        platform_settings = dict(self.config.get(platform_id, {}))
+        if platform_id == "qq":
+            platform_settings["format_rules"] = page.format_values()
+        else:
+            platform_settings.update(page.format_values())
+        validation = validate_platform_runtime_for_ui(
+            platform_id,
+            adapter,
+            platform_settings,
+            input_path,
+            output_dir,
+            page.recursive.isChecked(),
+        )
+        if not validation.ok:
+            QMessageBox.warning(self, page.spec.title, validation.reason or "运行环境不可用")
             return
-        try:
-            validate_writable_output_dir(output_dir)
-        except OSError as exc:
-            QMessageBox.warning(self, "输出目录", f"输出目录不可写：{output_dir}\n{exc}")
-            return
-        self._save_qq_config(page)
+        self.config.setdefault(platform_id, {}).update(validation.settings)
+        self._save_platform_config(platform_id, page)
         self.stop_event.clear()
         self.running = True
         self.started_at = time.perf_counter()
         self._set_busy(True)
         self._reset_progress()
-        self._append_log("QQ音乐: 开始")
+        self._append_log(f"{page.spec.title}: 开始")
 
         options = PlatformRunOptions(
             input_path=input_path,
@@ -565,19 +598,21 @@ class MainWindow(QWidget):
             qq_fetch_missing_ekey=page.fetch_ekey.isChecked(),
             qq_cache_ekeys=page.cache_ekey.isChecked(),
             format_rules=page.format_values(),
+            platform_settings=dict(validation.settings),
             event_sink=lambda event, payload: self.bridge.event_received.emit(event, dict(payload)),
             stop_requested=lambda: self.stop_event.is_set(),
         )
-        thread = threading.Thread(target=self._run_qq, args=(options,), daemon=True)
+        thread = threading.Thread(target=self._run_platform, args=(platform_id, options), daemon=True)
         thread.start()
 
-    def _run_qq(self, options: PlatformRunOptions) -> None:
+    def _run_platform(self, platform_id: str, options: PlatformRunOptions) -> None:
         result_code = 2
+        title = self.pages[platform_id].spec.title if platform_id in self.pages else platform_id
         try:
-            adapter = build_platform_adapter("qq")
-            result_code = run_batch(build_qq_batch_config(options), adapter)
+            adapter = build_platform_adapter(platform_id)
+            result_code = run_batch(build_platform_batch_config(platform_id, options), adapter)
         except Exception as exc:
-            self.bridge.log_message.emit(f"QQ音乐: {exc}")
+            self.bridge.log_message.emit(f"{title}: {exc}")
         finally:
             self.bridge.run_finished.emit(result_code)
 
@@ -585,6 +620,29 @@ class MainWindow(QWidget):
         if self.running:
             self.stop_event.set()
             self._append_log("停止请求已发送")
+
+    def _start_update(self) -> None:
+        if self.running:
+            self._append_log("正在转换，更新已跳过")
+            return
+        if self.updating:
+            return
+        self.updating = True
+        self.update_button.setEnabled(False)
+        self._append_log(f"开始更新系统，当前版本 {APP_VERSION}")
+        thread = threading.Thread(target=self._run_update_job, daemon=True)
+        thread.start()
+
+    def _run_update_job(self) -> None:
+        ok = False
+        try:
+            result = run_update(self.paths.root_dir)
+            ok = bool(result.ok)
+            self.bridge.log_message.emit(result.message)
+        except Exception as exc:
+            self.bridge.log_message.emit(f"更新失败：{exc}")
+        finally:
+            self.bridge.update_finished.emit(ok)
 
     def _reset_progress(self) -> None:
         self.progress.setValue(0)
@@ -596,8 +654,10 @@ class MainWindow(QWidget):
         self.elapsed_label.setText("耗时 0.0s")
 
     def _set_busy(self, busy: bool) -> None:
-        self.pages["qq"].set_busy(busy)
+        for page in self.pages.values():
+            page.set_busy(busy)
         self.stop_button.setEnabled(busy)
+        self.update_button.setEnabled(not busy and not self.updating)
 
     def _handle_run_event(self, event_name: str, payload: object) -> None:
         data = payload if isinstance(payload, dict) else {}
@@ -617,6 +677,9 @@ class MainWindow(QWidget):
         if event_name in {"file_decrypted", "batch_transcode_progress"}:
             name = pathlib.Path(str(data.get("input_path", ""))).name
             self.current_file.setText(f"当前文件 {name}")
+            if total:
+                self.progress.setValue(int(index / total * 100))
+                self.progress_label.setText(f"进度 {index} / {total}")
             message = str(data.get("message") or event_name)
             self._append_log(message)
             return
@@ -653,6 +716,10 @@ class MainWindow(QWidget):
         self.elapsed_label.setText(f"耗时 {_format_seconds(elapsed)}")
         self._append_log(f"QQ音乐: 结束 code={result_code}")
 
+    def _handle_update_finished(self, ok: bool) -> None:
+        self.updating = False
+        self.update_button.setEnabled(not self.running)
+
     def _append_log(self, message: str) -> None:
         text = str(message or "").strip()
         if not text:
@@ -673,6 +740,7 @@ def build_stylesheet() -> str:
     QLabel#Brand {{ font-size: 22px; font-weight: 700; color: {GREEN_DARK}; padding: 6px 6px; }}
     QLabel#PageTitle {{ font-size: 21px; font-weight: 700; }}
     QLabel#Muted, QLabel#FieldLabel {{ color: {MUTED}; }}
+    QLabel#AppVersion {{ color: {MUTED}; padding: 6px 4px; }}
     QLabel#StatusOk {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; border: 1px solid {GREEN}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
     QLabel#StatusOff {{ background: {RED_SOFT}; color: {RED_DARK}; border: 1px solid {RED}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
     QLabel#Stat {{ background: {GREEN_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {GREEN_DARK}; font-weight: 600; }}
@@ -682,6 +750,8 @@ def build_stylesheet() -> str:
     QPushButton#PrimaryButton {{ background: {GREEN}; color: white; min-width: 112px; }}
     QPushButton#PrimaryButton:hover {{ background: {GREEN_DARK}; }}
     QPushButton#DangerButton {{ background: {RED_SOFT}; color: {RED_DARK}; }}
+    QPushButton#UpdateButton {{ background: {RED_SOFT}; color: {RED_DARK}; }}
+    QPushButton#UpdateButton:hover {{ background: {RED}; color: white; }}
     QPushButton#SmallButton {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; padding: 6px 10px; }}
     QPushButton#DisabledButton, QPushButton:disabled {{ background: #EEF0F2; color: #98A2B3; }}
     QCheckBox {{ spacing: 8px; }}

@@ -19,6 +19,7 @@ FLET_NOTE = "main-ui 分支采用 PySide6。PySide6 基于 Qt for Python，桌�
 DEFAULT_KUGOU_INPUT = pathlib.Path(r"O:\KuGou\KugouMusic")
 DEFAULT_QQ_INPUT = pathlib.Path("")
 DEFAULT_NETEASE_INPUT = pathlib.Path("")
+DEFAULT_KUWO_INPUT = ""
 TRANSCODE_SAMPLE_RATE_OPTIONS = (22050, 32000, 44100, 48000, 88200, 96000)
 TRANSCODE_BITRATE_OPTIONS = (96, 128, 160, 192, 256, 320)
 DEFAULT_QQ_FORMAT_RULES = {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"}
@@ -159,6 +160,14 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             "transcode_bitrate_kbps": None,
             "auto_transcode_after_decode": False,
         },
+        "kuwo": {
+            "input_dir": DEFAULT_KUWO_INPUT,
+            "output_dir": str(paths.output_dir / "kuwo"),
+            "target_format_kwm": "auto",
+            "transcode_sample_rate_hz": None,
+            "transcode_bitrate_kbps": None,
+            "auto_transcode_after_decode": False,
+        },
         "transcode_batch": {
             "input_paths": [],
             "output_dir": str(paths.output_dir / "transcode"),
@@ -172,7 +181,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
             ],
         },
     }
-    for section in ("shared", "qq", "kugou", "netease", "transcode_batch"):
+    for section in ("shared", "qq", "kugou", "netease", "kuwo", "transcode_batch"):
         value = payload.get(section)
         if isinstance(value, dict):
             config[section].update(value)
@@ -192,7 +201,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     config["shared"]["output_mode"] = shared_output_mode
 
     shared_output_dir = pathlib.Path(str(config["shared"].get("output_dir", paths.output_dir) or paths.output_dir))
-    for platform_id in ("qq", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease", "kuwo"):
         platform_output_dir = str(config[platform_id].get("output_dir", "") or "").strip()
         if not platform_output_dir:
             config[platform_id]["output_dir"] = str(shared_output_dir / platform_id)
@@ -235,14 +244,14 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     config["qq"]["format_rules"] = format_rules
     config["shared"]["cli_collision_policy"] = str(config["shared"].get("cli_collision_policy", "suffix") or "suffix").lower()
     config["shared"]["recursive"] = bool(config["shared"].get("recursive", True))
-    for platform_id in ("qq", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease", "kuwo"):
         auto_transcode = config[platform_id].get("auto_transcode_after_decode", False)
         if isinstance(auto_transcode, str):
             auto_transcode = auto_transcode.strip().lower() in {"1", "true", "yes", "y", "on"}
         else:
             auto_transcode = bool(auto_transcode)
         config[platform_id]["auto_transcode_after_decode"] = auto_transcode
-    for platform_id in ("qq", "kugou", "netease"):
+    for platform_id in ("qq", "kugou", "netease", "kuwo"):
         config[platform_id]["transcode_sample_rate_hz"] = _normalize_optional_audio_choice(config[platform_id].get("transcode_sample_rate_hz"), TRANSCODE_SAMPLE_RATE_OPTIONS)
         config[platform_id]["transcode_bitrate_kbps"] = _normalize_optional_audio_choice(config[platform_id].get("transcode_bitrate_kbps"), TRANSCODE_BITRATE_OPTIONS)
     if config["qq"]["transcode_bitrate_kbps"] is None and "mp3" in set(config["qq"]["format_rules"].values()):
@@ -255,6 +264,7 @@ def load_config(paths: RuntimePaths) -> tuple[dict[str, Any], dict[str, Any]]:
     config["kugou"]["target_format_kgma"] = normalize_target_format(config["kugou"].get("target_format_kgma", "auto"))
     config["kugou"]["target_format_kgg"] = normalize_target_format(config["kugou"].get("target_format_kgg", "auto"))
     config["netease"]["target_format_ncm"] = normalize_target_format(config["netease"].get("target_format_ncm", "auto"))
+    config["kuwo"]["target_format_kwm"] = normalize_target_format(config["kuwo"].get("target_format_kwm", "auto"))
 
     transcode_batch = config["transcode_batch"]
     raw_input_paths = transcode_batch.get("input_paths", [])

@@ -402,6 +402,15 @@ class QQMusicExOfflineTests(unittest.TestCase):
         self.assertEqual(FakeKernel32.ReadProcessMemory.restype, musicex_offline.ctypes.wintypes.BOOL)
         self.assertEqual(FakePsapi.EnumProcesses.restype, musicex_offline.ctypes.wintypes.BOOL)
 
+    def test_cookie_provider_uses_process_query_to_find_qqmusic_pid(self) -> None:
+        class Match:
+            pid = 23156
+
+        with mock.patch.object(musicex_offline, "find_process_by_name", return_value=Match()):
+            pid = musicex_offline.QQMusicCookieProvider._find_qqmusic_pid(None, None)
+
+        self.assertEqual(pid, 23156)
+
     def test_adapter_uses_offline_musicex_decrypt(self) -> None:
         class OfflineDecryptor:
             def __init__(self) -> None:

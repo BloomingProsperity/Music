@@ -14,4 +14,8 @@ def build_platform_adapter(platform_id: str):
         from src.Infrastructure.platforms.netease.adapter import NeteasePlatformAdapter
 
         return NeteasePlatformAdapter()
+    if normalized == "kuwo":
+        from src.Infrastructure.platforms.kuwo.adapter import KuwoPlatformAdapter
+
+        return KuwoPlatformAdapter()
     raise ValueError(f"unsupported platform: {platform_id}")

@@ -84,6 +84,7 @@ class CliParserTests(unittest.TestCase):
                 },
                 "kugou": {},
                 "netease": {},
+                "kuwo": {},
             }
 
             with (
@@ -95,6 +96,18 @@ class CliParserTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         run_platform.assert_called_once()
+
+    def test_kuwo_decrypt_parser_accepts_kwm_format_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            parser = build_parser(_runtime_paths(root))
+
+            for target_format in ("auto", "mp3", "flac", "m4a", "wav"):
+                args = parser.parse_args(["kuwo", "decrypt", "--format-kwm", target_format])
+
+                self.assertEqual(args.platform, "kuwo")
+                self.assertEqual(args.command, "decrypt")
+                self.assertEqual(args.format_kwm, target_format)
 
 
 if __name__ == "__main__":

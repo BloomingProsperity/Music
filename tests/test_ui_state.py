@@ -6,10 +6,25 @@ import pytest
 
 from src.Presentation.ui_state import (
     PlatformRunOptions,
+    build_platform_batch_config,
     build_qq_batch_config,
     platform_specs,
+    validate_platform_runtime_for_ui,
     validate_writable_output_dir,
 )
+
+
+class _FakeAdapter:
+    def __init__(self, *, ok: bool = True, reason: str | None = None, files: list[pathlib.Path] | None = None) -> None:
+        self.ok = ok
+        self.reason = reason
+        self.files = files or []
+
+    def validate_runtime(self, settings: dict) -> tuple[bool, str | None]:
+        return self.ok, self.reason
+
+    def collect_files(self, input_path: pathlib.Path, recursive: bool) -> list[pathlib.Path]:
+        return self.files
 
 
 def test_platform_specs_keep_core_pages_and_formats() -> None:
@@ -21,6 +36,10 @@ def test_platform_specs_keep_core_pages_and_formats() -> None:
     assert all(control.options == ("mp3", "flac", "m4a", "wav") for control in specs[0].format_controls)
     assert specs[1].source_extensions == (".kgm", ".kgma", ".kgg", ".vpr", ".kgm.flac", ".vpr.flac")
     assert specs[2].source_extensions == (".ncm",)
+    assert specs[3].source_extensions == (".kwm",)
+    assert [control.key for control in specs[3].format_controls] == ["target_format_kwm"]
+    assert specs[1].enabled is True
+    assert specs[2].enabled is True
     assert specs[3].enabled is False
 
 
@@ -66,6 +85,71 @@ def test_build_qq_batch_config_preserves_paths_formats_and_transcode_options() -
     assert batch_config.settings["qq_cache_ekeys"] is True
 
 
+def test_build_platform_batch_config_preserves_netease_settings_and_callbacks() -> None:
+    seen: list[tuple[str, dict]] = []
+    options = PlatformRunOptions(
+        input_path=pathlib.Path(r"C:\music\netease"),
+        output_dir=pathlib.Path(r"C:\music\out"),
+        recursive=False,
+        transcode_enabled=True,
+        transcode_max_workers=4,
+        embed_cover_art=True,
+        supplement_album_metadata=True,
+        sample_rate_hz=44100,
+        bitrate_kbps=256,
+        platform_settings={"target_format_ncm": "mp3"},
+        event_sink=lambda event, payload: seen.append((event, payload)),
+        stop_requested=lambda: False,
+    )
+
+    batch_config = build_platform_batch_config("netease", options)
+
+    assert batch_config.platform_id == "netease"
+    assert batch_config.input_path == pathlib.Path(r"C:\music\netease")
+    assert batch_config.output_dir == pathlib.Path(r"C:\music\out")
+    assert batch_config.recursive is False
+    assert batch_config.settings["target_format_ncm"] == "mp3"
+    assert batch_config.settings["transcode_enabled"] is True
+    assert batch_config.settings["transcode_max_workers"] == 4
+    assert batch_config.settings["embed_cover_art"] is True
+    assert batch_config.settings["supplement_album_metadata"] is True
+    assert batch_config.settings["transcode_sample_rate_hz"] == 44100
+    assert batch_config.settings["transcode_bitrate_kbps"] == 256
+    assert batch_config.event_sink is options.event_sink
+    assert batch_config.stop_requested is options.stop_requested
+
+
+def test_build_platform_batch_config_preserves_kugou_key_and_db_settings() -> None:
+    options = PlatformRunOptions(
+        input_path=pathlib.Path(r"C:\music\kugou"),
+        output_dir=pathlib.Path(r"C:\music\out"),
+        recursive=True,
+        transcode_enabled=False,
+        transcode_max_workers=1,
+        sample_rate_hz=None,
+        bitrate_kbps=None,
+        platform_settings={
+            "target_format_kgma": "flac",
+            "target_format_kgg": "mp3",
+            "key_file": r"C:\keys\kugou_key.xz",
+            "kgg_db_path": r"C:\keys\KGMusicV3.db",
+        },
+    )
+
+    batch_config = build_platform_batch_config("kugou", options)
+
+    assert batch_config.platform_id == "kugou"
+    assert batch_config.input_path == pathlib.Path(r"C:\music\kugou")
+    assert batch_config.output_dir == pathlib.Path(r"C:\music\out")
+    assert batch_config.recursive is True
+    assert batch_config.settings["target_format_kgma"] == "flac"
+    assert batch_config.settings["target_format_kgg"] == "mp3"
+    assert batch_config.settings["key_file"] == r"C:\keys\kugou_key.xz"
+    assert batch_config.settings["kgg_db_path"] == r"C:\keys\KGMusicV3.db"
+    assert batch_config.settings["transcode_enabled"] is False
+    assert batch_config.settings["transcode_max_workers"] == 1
+
+
 def test_validate_writable_output_dir_creates_and_cleans_probe_file(tmp_path: pathlib.Path) -> None:
     output_dir = tmp_path / "music-output"
 
@@ -81,3 +165,60 @@ def test_validate_writable_output_dir_rejects_file_path(tmp_path: pathlib.Path) 
 
     with pytest.raises(OSError):
         validate_writable_output_dir(output_file)
+
+
+def test_validate_platform_runtime_for_ui_accepts_netease_with_writable_output(tmp_path: pathlib.Path) -> None:
+    input_dir = tmp_path / "ncm"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+
+    result = validate_platform_runtime_for_ui(
+        "netease",
+        _FakeAdapter(),
+        {"target_format_ncm": "mp3"},
+        input_dir,
+        output_dir,
+        recursive=True,
+    )
+
+    assert result.ok is True
+    assert result.reason is None
+    assert output_dir.is_dir()
+
+
+def test_validate_platform_runtime_for_ui_rejects_adapter_runtime_error(tmp_path: pathlib.Path) -> None:
+    input_dir = tmp_path / "kgm"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+
+    result = validate_platform_runtime_for_ui(
+        "kugou",
+        _FakeAdapter(ok=False, reason="missing key"),
+        {},
+        input_dir,
+        output_dir,
+        recursive=True,
+    )
+
+    assert result.ok is False
+    assert result.reason == "missing key"
+
+
+def test_validate_platform_runtime_for_ui_rejects_kgg_without_database(tmp_path: pathlib.Path) -> None:
+    input_dir = tmp_path / "kgm"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    kgg_file = input_dir / "song.kgg"
+    kgg_file.write_bytes(b"kgg")
+
+    result = validate_platform_runtime_for_ui(
+        "kugou",
+        _FakeAdapter(files=[kgg_file]),
+        {"kgg_db_path": str(tmp_path / "missing.db")},
+        input_dir,
+        output_dir,
+        recursive=True,
+    )
+
+    assert result.ok is False
+    assert "KGMusicV3.db" in str(result.reason)

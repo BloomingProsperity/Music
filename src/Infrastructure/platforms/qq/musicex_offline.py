@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from src.Infrastructure.process_utils import find_process_by_name
 from src.Infrastructure.transcoder import fast_detect_container
 
 
@@ -527,6 +528,38 @@ class QQMusicCookieProvider:
         return {"cookie": cookie, "uin": uin}
 
     @classmethod
+    def _find_qqmusic_pid(cls, kernel32, psapi) -> int | None:
+        try:
+            match = find_process_by_name("QQMusic")
+            if match is not None and int(match.pid) > 0:
+                return int(match.pid)
+        except Exception:
+            pass
+        process_vm_read = 0x0010
+        process_query_information = 0x0400
+        enum_buffer = (ctypes.wintypes.DWORD * 4096)()
+        cb_needed = ctypes.wintypes.DWORD()
+        if not psapi.EnumProcesses(enum_buffer, ctypes.sizeof(enum_buffer), ctypes.byref(cb_needed)):
+            return None
+
+        max_path = 260
+        process_count = cb_needed.value // ctypes.sizeof(ctypes.wintypes.DWORD)
+        for index in range(process_count):
+            pid = int(enum_buffer[index])
+            if pid == 0:
+                continue
+            handle = kernel32.OpenProcess(process_query_information | process_vm_read, False, pid)
+            if not handle:
+                continue
+            try:
+                name_buffer = (ctypes.c_char * max_path)()
+                if psapi.GetModuleBaseNameA(handle, None, name_buffer, max_path) and name_buffer.value == b"QQMusic.exe":
+                    return pid
+            finally:
+                kernel32.CloseHandle(handle)
+        return None
+
+    @classmethod
     def _extract_windows_cookie(cls) -> dict[str, str] | None:
         try:
             kernel32 = ctypes.windll.kernel32
@@ -537,28 +570,7 @@ class QQMusicCookieProvider:
 
         process_vm_read = 0x0010
         process_query_information = 0x0400
-        enum_buffer = (ctypes.wintypes.DWORD * 4096)()
-        cb_needed = ctypes.wintypes.DWORD()
-        if not psapi.EnumProcesses(enum_buffer, ctypes.sizeof(enum_buffer), ctypes.byref(cb_needed)):
-            return None
-
-        qqmusic_pid = None
-        max_path = 260
-        process_count = cb_needed.value // ctypes.sizeof(ctypes.wintypes.DWORD)
-        for index in range(process_count):
-            pid = enum_buffer[index]
-            if pid == 0:
-                continue
-            handle = kernel32.OpenProcess(process_query_information | process_vm_read, False, pid)
-            if not handle:
-                continue
-            try:
-                name_buffer = (ctypes.c_char * max_path)()
-                if psapi.GetModuleBaseNameA(handle, None, name_buffer, max_path) and name_buffer.value == b"QQMusic.exe":
-                    qqmusic_pid = pid
-                    break
-            finally:
-                kernel32.CloseHandle(handle)
+        qqmusic_pid = cls._find_qqmusic_pid(kernel32, psapi)
         if qqmusic_pid is None:
             return None
 
