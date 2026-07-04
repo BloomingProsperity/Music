@@ -40,11 +40,14 @@ class CliParserTests(unittest.TestCase):
                     "48000",
                     "--bitrate",
                     "320",
+                    "--transcode-workers",
+                    "2",
                 ]
             )
 
             self.assertEqual(args.sample_rate, 48000)
             self.assertEqual(args.bitrate, 320)
+            self.assertEqual(args.transcode_workers, 2)
 
     def test_qq_decrypt_parser_accepts_local_mode_options(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

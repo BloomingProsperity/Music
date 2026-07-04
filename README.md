@@ -55,6 +55,14 @@
 python main.py transcode-batch --input D:\music --output D:\mp3 --rule 全部:mp3::320 --max-workers 2
 ```
 
+如果源文件在 U 盘或移动硬盘，推荐把输出目录放到 C 盘，减少移动盘反复读写：
+
+```powershell
+python main.py qq decrypt --input D:\ --output C:\qkk_mp3 --format-mflac mp3 --bitrate 320 --transcode-workers 2 --no-embed-cover
+```
+
+`--transcode-workers` 可设为 `1` 到 `4`。机械盘/U 盘建议 `1` 或 `2`，CPU 和 SSD 都有余量时再提高。
+
 支持输入格式：`flac` / `m4a` / `mp3` / `wav` / `ogg` / `aac` / `ape`。
 支持输出格式：`mp3` / `flac` / `m4a` / `wav`。
 可选采样率：`22050` / `32000` / `44100` / `48000` / `88200` / `96000` Hz。
