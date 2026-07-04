@@ -97,6 +97,91 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(result, 0)
         run_platform.assert_called_once()
 
+    def test_explicit_cli_transcode_enables_noninteractive_batch_transcode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            config = {
+                "shared": {
+                    "output_dir": str(paths.output_dir),
+                    "recursive": True,
+                    "transcode_enabled": False,
+                    "embed_cover_art": False,
+                    "supplement_album_metadata": False,
+                },
+                "qq": {},
+                "kugou": {},
+                "netease": {"auto_transcode_after_decode": False},
+                "kuwo": {},
+            }
+
+            with (
+                mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(cli, "load_config", return_value=({}, config)),
+                mock.patch.object(cli, "_run_platform", return_value=0) as run_platform,
+            ):
+                result = cli.main(
+                    [
+                        "netease",
+                        "decrypt",
+                        "--input",
+                        str(root),
+                        "--output",
+                        str(root / "out"),
+                        "--format-ncm",
+                        "mp3",
+                        "--transcode",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        passed_config = run_platform.call_args.args[1]
+        self.assertTrue(passed_config["shared"]["transcode_enabled"])
+        self.assertEqual(passed_config["netease"]["target_format_ncm"], "mp3")
+        self.assertTrue(passed_config["netease"]["auto_transcode_after_decode"])
+
+    def test_explicit_cli_target_format_reenables_shared_transcode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paths = _runtime_paths(root)
+            config = {
+                "shared": {
+                    "output_dir": str(paths.output_dir),
+                    "recursive": True,
+                    "transcode_enabled": False,
+                    "embed_cover_art": False,
+                    "supplement_album_metadata": False,
+                },
+                "qq": {},
+                "kugou": {},
+                "netease": {"auto_transcode_after_decode": False},
+                "kuwo": {},
+            }
+
+            with (
+                mock.patch.object(cli.RuntimePaths, "discover", return_value=paths),
+                mock.patch.object(cli, "load_config", return_value=({}, config)),
+                mock.patch.object(cli, "_run_platform", return_value=0) as run_platform,
+            ):
+                result = cli.main(
+                    [
+                        "netease",
+                        "decrypt",
+                        "--input",
+                        str(root),
+                        "--output",
+                        str(root / "out"),
+                        "--format-ncm",
+                        "mp3",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        passed_config = run_platform.call_args.args[1]
+        self.assertTrue(passed_config["shared"]["transcode_enabled"])
+        self.assertEqual(passed_config["netease"]["target_format_ncm"], "mp3")
+        self.assertTrue(passed_config["netease"]["auto_transcode_after_decode"])
+
     def test_kuwo_decrypt_parser_accepts_kwm_format_options(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)

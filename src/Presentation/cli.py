@@ -495,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     platform_id = args.platform
     settings = dict(config[platform_id])
+    explicit_non_auto_target = False
     if args.transcode_enabled is not None:
         config["shared"]["transcode_enabled"] = bool(args.transcode_enabled)
     if getattr(args, "transcode_workers", None) is not None:
@@ -512,7 +513,9 @@ def main(argv: list[str] | None = None) -> int:
         for source_key, attr_name in (("mflac", "format_mflac"), ("mgg", "format_mgg"), ("mmp4", "format_mmp4")):
             value = getattr(args, attr_name)
             if value:
-                rules[source_key] = validate_target_format(value)
+                target = validate_target_format(value)
+                rules[source_key] = target
+                explicit_non_auto_target = True
         settings["format_rules"] = rules
         if getattr(args, "qq_no_fetch_ekey", False):
             settings["qq_fetch_missing_ekey"] = False
@@ -524,15 +527,29 @@ def main(argv: list[str] | None = None) -> int:
         if args.key_file:
             settings["key_file"] = args.key_file
         if args.format_kgma:
-            settings["target_format_kgma"] = validate_target_format(args.format_kgma)
+            target = validate_target_format(args.format_kgma)
+            settings["target_format_kgma"] = target
+            explicit_non_auto_target = explicit_non_auto_target or target != "auto"
         if args.format_kgg:
-            settings["target_format_kgg"] = validate_target_format(args.format_kgg)
+            target = validate_target_format(args.format_kgg)
+            settings["target_format_kgg"] = target
+            explicit_non_auto_target = explicit_non_auto_target or target != "auto"
     elif platform_id == "netease":
         if args.format_ncm:
-            settings["target_format_ncm"] = validate_target_format(args.format_ncm)
+            target = validate_target_format(args.format_ncm)
+            settings["target_format_ncm"] = target
+            explicit_non_auto_target = target != "auto"
     elif platform_id == "kuwo":
         if args.format_kwm:
-            settings["target_format_kwm"] = validate_target_format(args.format_kwm)
+            target = validate_target_format(args.format_kwm)
+            settings["target_format_kwm"] = target
+            explicit_non_auto_target = target != "auto"
+    if explicit_non_auto_target and args.transcode_enabled is not False:
+        config["shared"]["transcode_enabled"] = True
+    if args.transcode_enabled is False:
+        settings["auto_transcode_after_decode"] = False
+    elif args.transcode_enabled is True or explicit_non_auto_target:
+        settings["auto_transcode_after_decode"] = True
     config[platform_id].update(settings)
     recursive = not args.no_recursive
     return _run_platform(platform_id, config, input_override=args.input, output_override=args.output, recursive_override=recursive, interactive=False)
