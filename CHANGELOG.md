@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.21 - 2026-07-05
+
+- 接入新版 Studio Amber UI 主题，优化控件边框、进度面板和运行态动效配色。
+
 ## 0.20 - 2026-07-05
 
 - 重构 UI 为深色处理面板，并新增运行态代码雨和处理终端动效。

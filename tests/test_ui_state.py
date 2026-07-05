@@ -32,8 +32,9 @@ def test_platform_specs_keep_core_pages_and_formats() -> None:
 
     assert [item.platform_id for item in specs] == ["qq", "kugou", "netease", "kuwo"]
     assert specs[0].source_extensions == (".mflac", ".mgg", ".mmp4")
-    assert [control.key for control in specs[0].format_controls] == ["mflac", "mgg", "mmp4"]
-    assert all(control.options == ("mp3", "flac", "m4a", "wav") for control in specs[0].format_controls)
+    assert [control.key for control in specs[0].format_controls] == ["qq_output_format"]
+    assert specs[0].format_controls[0].label == "输出格式"
+    assert specs[0].format_controls[0].options == ("mp3", "flac", "m4a", "wav")
     assert specs[1].source_extensions == (".kgm", ".kgma", ".kgg", ".vpr", ".kgm.flac", ".vpr.flac")
     assert specs[2].source_extensions == (".ncm",)
     assert specs[3].source_extensions == (".kwm", ".kwma", ".kwm.flac")

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QListView,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -47,34 +48,37 @@ from src.Infrastructure.update_service import check_update_availability, resolve
 from src.Presentation.ui_state import (
     PlatformRunOptions,
     PlatformSpec,
+    QQ_FORMAT_RULE_KEYS,
     build_platform_batch_config,
     platform_specs,
     validate_platform_runtime_for_ui,
 )
+from src.Presentation.qkk_theme import ACCENT, RAIN_BG, RAIN_RGB, TERMINAL_BG, build_stylesheet
 
 
 UPDATE_CHECK_DELAY_MS = 100
-
-APP_BG = "#070B10"
-PANEL_BG = "#0F151D"
-PANEL_ALT = "#111B22"
-BORDER = "#22303B"
-TEXT = "#E5F4EC"
-MUTED = "#8B9AA7"
-GREEN = "#37E68B"
-GREEN_DARK = "#0FBF72"
-GREEN_SOFT = "#122B22"
-RED = "#FF5D73"
-RED_DARK = "#FF7A8C"
-RED_SOFT = "#321820"
-CONTROL_BG = "#080D12"
-CONTROL_BORDER = "#32424C"
+BOX_GAP = 18
+CONTROL_GAP = 10
+DENSE_GAP = 8
+POPUP_GAP = 4
 
 
 def _format_seconds(value: float) -> str:
     if value <= 0:
         return "0.0s"
     return f"{value:.1f}s"
+
+
+def _configure_combo_popup(combo: QComboBox) -> QComboBox:
+    combo.setCursor(Qt.CursorShape.PointingHandCursor)
+    view = QListView(combo)
+    view.setObjectName("ComboPopup")
+    view.setMouseTracking(True)
+    view.setUniformItemSizes(True)
+    view.setSpacing(POPUP_GAP)
+    view.setFrameShape(QFrame.Shape.NoFrame)
+    combo.setView(view)
+    return combo
 
 
 class UiBridge(QObject):
@@ -103,6 +107,8 @@ class MatrixRainWidget(QWidget):
         self.setProperty("processing", False)
         self.setProperty("glyphs", self._glyphs)
         self.setProperty("glyphsVisible", False)
+        self.setProperty("themeAccent", ACCENT)
+        self.setProperty("themeBackground", TERMINAL_BG)
 
     def set_processing(self, processing: bool) -> None:
         self._processing = bool(processing)
@@ -140,12 +146,13 @@ class MatrixRainWidget(QWidget):
         super().paintEvent(event)  # type: ignore[arg-type]
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, False)
-        painter.fillRect(self.rect(), QColor(4, 8, 12, 245))
+        painter.fillRect(self.rect(), QColor(*RAIN_BG, 245))
         if not self._processing:
             return
         painter.setFont(QFont("Consolas", 9))
         head_alpha = 230 if self._processing else 130
         tail_alpha = 82 if self._processing else 42
+        red, green, blue = RAIN_RGB
         for column, drop in enumerate(self._drops):
             x = column * 13 + 2
             for trail in range(5):
@@ -154,7 +161,7 @@ class MatrixRainWidget(QWidget):
                     continue
                 glyph = self._glyphs[(column * 7 + trail + self._frame) % len(self._glyphs)]
                 alpha = head_alpha if trail == 0 else max(18, tail_alpha - trail * 12)
-                painter.setPen(QColor(55, 230, 139, alpha))
+                painter.setPen(QColor(red, green, blue, alpha))
                 painter.drawText(x, y, glyph)
 
 
@@ -229,13 +236,15 @@ class PathRow(QWidget):
         super().__init__()
         self.allow_file = allow_file
         self.allow_open = allow_open
+        self.layout_mode = "inline"
         self.setMinimumHeight(52)
-        root = QGridLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setHorizontalSpacing(10)
-        root.setVerticalSpacing(3)
+        self.root_layout = QGridLayout(self)
+        self.root_layout.setContentsMargins(0, 0, 0, 0)
+        self.root_layout.setHorizontalSpacing(CONTROL_GAP)
+        self.root_layout.setVerticalSpacing(6)
         title = QLabel(label)
         title.setObjectName("FieldLabel")
+        self.title = title
         self.edit = QLineEdit()
         self.edit.setObjectName("Input")
         self.edit.setMinimumWidth(120)
@@ -258,15 +267,44 @@ class PathRow(QWidget):
         self.open_button.setFixedWidth(60)
         self.open_button.setFixedHeight(30)
         self.open_button.setVisible(allow_open)
-        root.addWidget(title, 0, 0, 1, 4)
-        root.addWidget(self.edit, 1, 0)
-        root.addWidget(self.dir_button, 1, 1)
-        root.addWidget(self.file_button, 1, 2)
-        root.addWidget(self.open_button, 1, 3)
-        root.setColumnStretch(0, 1)
+        self._apply_layout("inline")
         self.dir_button.clicked.connect(self._choose_dir)
         self.file_button.clicked.connect(self._choose_file)
         self.open_button.clicked.connect(self._open_path)
+
+    def resizeEvent(self, event: object) -> None:
+        super().resizeEvent(event)  # type: ignore[arg-type]
+        self._update_responsive_layout()
+
+    def _update_responsive_layout(self) -> None:
+        mode = "stacked" if self.width() < 760 else "inline"
+        if mode != self.layout_mode:
+            self._apply_layout(mode)
+
+    def _apply_layout(self, mode: str) -> None:
+        self.layout_mode = mode
+        layout = self.root_layout
+        if mode == "stacked":
+            self.setMinimumHeight(86)
+            layout.addWidget(self.title, 0, 0, 1, 3)
+            layout.addWidget(self.edit, 1, 0, 1, 3)
+            layout.addWidget(self.dir_button, 2, 1)
+            layout.addWidget(self.file_button, 2, 2)
+            layout.addWidget(self.open_button, 2, 2)
+            layout.setColumnStretch(0, 1)
+            layout.setColumnStretch(1, 0)
+            layout.setColumnStretch(2, 0)
+            return
+
+        self.setMinimumHeight(52)
+        layout.addWidget(self.title, 0, 0, 1, 3)
+        layout.addWidget(self.edit, 1, 0)
+        layout.addWidget(self.dir_button, 1, 1)
+        layout.addWidget(self.file_button, 1, 2)
+        layout.addWidget(self.open_button, 1, 2)
+        layout.setColumnStretch(0, 1)
+        layout.setColumnStretch(1, 0)
+        layout.setColumnStretch(2, 0)
 
     def text(self) -> str:
         return self.edit.text().strip()
@@ -305,7 +343,7 @@ class PlatformPage(QWidget):
         self.format_widgets: dict[str, QComboBox] = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        root.setSpacing(BOX_GAP)
 
         header = QFrame()
         header.setObjectName("Panel")
@@ -334,7 +372,7 @@ class PlatformPage(QWidget):
         form.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.form_layout = QVBoxLayout(form)
         self.form_layout.setContentsMargins(12, 6, 12, 6)
-        self.form_layout.setSpacing(8)
+        self.form_layout.setSpacing(BOX_GAP)
 
         self.input_path = PathRow("输入路径", allow_file=True)
         self.output_dir = PathRow("输出目录", allow_open=True)
@@ -343,15 +381,16 @@ class PlatformPage(QWidget):
 
         self.config_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self.config_layout.setContentsMargins(0, 0, 0, 0)
-        self.config_layout.setSpacing(14)
+        self.config_layout.setSpacing(BOX_GAP)
 
-        self.format_box = QWidget()
+        self.format_box = QFrame()
+        self.format_box.setObjectName("FormatPanel")
         self.format_box.setMinimumWidth(260)
         self.format_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         formats = QGridLayout()
-        formats.setContentsMargins(0, 0, 0, 0)
-        formats.setHorizontalSpacing(10)
-        formats.setVerticalSpacing(5)
+        formats.setContentsMargins(12, 10, 12, 12)
+        formats.setHorizontalSpacing(CONTROL_GAP)
+        formats.setVerticalSpacing(DENSE_GAP)
         format_columns = max(1, min(3, len(spec.format_controls)))
         for index, control in enumerate(spec.format_controls):
             label_row = (index // format_columns) * 2
@@ -362,7 +401,8 @@ class PlatformPage(QWidget):
             label.setMinimumWidth(92)
             label.setMaximumWidth(150)
             combo = QComboBox()
-            combo.setObjectName("Combo")
+            _configure_combo_popup(combo)
+            combo.setObjectName("QQOutputFormat" if spec.platform_id == "qq" else "Combo")
             combo.setFixedHeight(28)
             combo.setMinimumWidth(92)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -374,6 +414,7 @@ class PlatformPage(QWidget):
         for column in range(format_columns):
             formats.setColumnStretch(column, 1)
         self.format_box.setLayout(formats)
+        self.format_box.setMinimumHeight(self.format_box.sizeHint().height())
 
         self.options_panel = QFrame()
         self.options_panel.setObjectName("SoftPanel")
@@ -381,8 +422,8 @@ class PlatformPage(QWidget):
         self.options_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         option_grid = QGridLayout(self.options_panel)
         option_grid.setContentsMargins(6, 6, 6, 6)
-        option_grid.setHorizontalSpacing(8)
-        option_grid.setVerticalSpacing(4)
+        option_grid.setHorizontalSpacing(DENSE_GAP)
+        option_grid.setVerticalSpacing(POPUP_GAP)
 
         self.recursive = QCheckBox("递归扫描")
         self.recursive.setChecked(True)
@@ -415,6 +456,7 @@ class PlatformPage(QWidget):
             check.setFixedHeight(26)
 
         self.sample_rate = QComboBox()
+        _configure_combo_popup(self.sample_rate)
         self.sample_rate.setObjectName("Combo")
         self.sample_rate.setFixedHeight(28)
         self.sample_rate.setMinimumWidth(92)
@@ -422,6 +464,7 @@ class PlatformPage(QWidget):
         for value in TRANSCODE_SAMPLE_RATE_OPTIONS:
             self.sample_rate.addItem(str(value), value)
         self.bitrate = QComboBox()
+        _configure_combo_popup(self.bitrate)
         self.bitrate.setObjectName("Combo")
         self.bitrate.setFixedHeight(28)
         self.bitrate.setMinimumWidth(82)
@@ -461,9 +504,10 @@ class PlatformPage(QWidget):
         self.form_scroll.setObjectName("FormScroll")
         self.form_scroll.setWidgetResizable(True)
         self.form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.form_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.form_scroll.setMinimumHeight(250)
-        self.form_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.form_scroll.setMinimumHeight(0)
+        self.form_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.form_scroll.setWidget(form)
         root.addWidget(self.form_scroll, 1)
 
@@ -515,11 +559,36 @@ class PlatformPage(QWidget):
             QSizePolicy.Policy.Expanding if compact else QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
         )
+        form = self.form_scroll.widget()
+        if form is not None:
+            self.form_scroll.setMinimumHeight(form.sizeHint().height() + 2)
 
     def format_values(self) -> dict[str, str]:
+        if self.spec.platform_id == "qq":
+            widget = self.format_widgets.get("qq_output_format")
+            value = widget.currentText().strip().lower() if widget is not None else "mp3"
+            return {key: value for key in QQ_FORMAT_RULE_KEYS}
         return {key: widget.currentText().strip().lower() for key, widget in self.format_widgets.items()}
 
     def set_format_values(self, values: dict[str, Any]) -> None:
+        if self.spec.platform_id == "qq":
+            widget = self.format_widgets.get("qq_output_format")
+            if widget is None:
+                return
+            options = [widget.itemText(index) for index in range(widget.count())]
+            explicit = str(values.get("qq_output_format") or "").strip().lower()
+            legacy_values = [
+                str(values.get(key) or "").strip().lower()
+                for key in QQ_FORMAT_RULE_KEYS
+                if str(values.get(key) or "").strip().lower()
+            ]
+            value = explicit
+            if value not in options and legacy_values:
+                unique_values = {item for item in legacy_values if item in options}
+                value = legacy_values[0] if len(unique_values) != 1 else next(iter(unique_values))
+            if value in options:
+                widget.setCurrentText(value)
+            return
         for key, widget in self.format_widgets.items():
             value = str(values.get(key, widget.currentText()) or widget.currentText()).strip().lower()
             if value in [widget.itemText(index) for index in range(widget.count())]:
@@ -578,7 +647,7 @@ class MainWindow(QWidget):
 
         root = QHBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(14)
+        root.setSpacing(BOX_GAP)
 
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
@@ -607,25 +676,31 @@ class MainWindow(QWidget):
         side_layout.addWidget(self.update_button)
         root.addWidget(sidebar)
 
-        content = QVBoxLayout()
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(14)
+        self.content_scroll = QScrollArea()
+        self.content_scroll.setObjectName("ContentScroll")
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.content_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content_body = QWidget()
+        content = QVBoxLayout(content_body)
+        content.setContentsMargins(0, 0, 4, 0)
+        content.setSpacing(BOX_GAP)
 
         self.stack = QStackedWidget()
         self.stack.setObjectName("Stack")
-        self.stack.setMinimumHeight(400)
-        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.stack.setMinimumHeight(0)
+        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         for spec in self.specs:
             page = PlatformPage(spec)
             self.pages[spec.platform_id] = page
             self.stack.addWidget(page)
-        content.addWidget(self.stack, 1)
+        content.addWidget(self.stack, 0)
 
         run_panel = QFrame()
         run_panel.setObjectName("Panel")
         run_layout = QVBoxLayout(run_panel)
         run_layout.setContentsMargins(16, 12, 16, 12)
-        run_layout.setSpacing(10)
+        run_layout.setSpacing(BOX_GAP)
 
         top = QHBoxLayout()
         self.stop_button = QPushButton("停止")
@@ -644,13 +719,13 @@ class MainWindow(QWidget):
         run_layout.addLayout(top)
 
         self.run_progress_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
-        self.run_progress_layout.setSpacing(12)
+        self.run_progress_layout.setSpacing(BOX_GAP)
 
         decrypt_card = QFrame()
         decrypt_card.setObjectName("StatusBlock")
         decrypt_layout = QVBoxLayout(decrypt_card)
         decrypt_layout.setContentsMargins(12, 10, 12, 10)
-        decrypt_layout.setSpacing(8)
+        decrypt_layout.setSpacing(DENSE_GAP)
         decrypt_head = QHBoxLayout()
         self.progress_label = QLabel("解密 0 / 0")
         self.progress_label.setObjectName("DecryptProgressLabel")
@@ -667,7 +742,9 @@ class MainWindow(QWidget):
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
         decrypt_layout.addWidget(self.progress)
-        decrypt_stats = QHBoxLayout()
+        decrypt_stats = QGridLayout()
+        decrypt_stats.setHorizontalSpacing(CONTROL_GAP)
+        decrypt_stats.setVerticalSpacing(DENSE_GAP)
         self.success_label = QLabel("成功 0")
         self.failed_label = QLabel("失败 0")
         self.skipped_label = QLabel("跳过 0")
@@ -675,16 +752,19 @@ class MainWindow(QWidget):
         self.decode_rate_label.setObjectName("DecodeSuccessRate")
         for label in (self.success_label, self.failed_label, self.skipped_label):
             label.setObjectName("Stat")
-            decrypt_stats.addWidget(label)
-        decrypt_stats.addWidget(self.decode_rate_label)
-        decrypt_stats.addStretch(1)
+        decrypt_stats.addWidget(self.success_label, 0, 0)
+        decrypt_stats.addWidget(self.failed_label, 0, 1)
+        decrypt_stats.addWidget(self.skipped_label, 1, 0)
+        decrypt_stats.addWidget(self.decode_rate_label, 1, 1)
+        decrypt_stats.setColumnStretch(0, 1)
+        decrypt_stats.setColumnStretch(1, 1)
         decrypt_layout.addLayout(decrypt_stats)
 
         transcode_card = QFrame()
         transcode_card.setObjectName("StatusBlock")
         transcode_layout = QVBoxLayout(transcode_card)
         transcode_layout.setContentsMargins(12, 10, 12, 10)
-        transcode_layout.setSpacing(8)
+        transcode_layout.setSpacing(DENSE_GAP)
         transcode_head = QHBoxLayout()
         self.transcode_progress_label = QLabel("转码 0 / 0")
         self.transcode_progress_label.setObjectName("TranscodeProgressLabel")
@@ -701,7 +781,9 @@ class MainWindow(QWidget):
         self.transcode_progress.setValue(0)
         self.transcode_progress.setTextVisible(False)
         transcode_layout.addWidget(self.transcode_progress)
-        transcode_stats = QHBoxLayout()
+        transcode_stats = QGridLayout()
+        transcode_stats.setHorizontalSpacing(CONTROL_GAP)
+        transcode_stats.setVerticalSpacing(DENSE_GAP)
         self.transcode_success_label = QLabel("成功 0")
         self.transcode_failed_label = QLabel("失败 0")
         self.transcode_waiting_label = QLabel("等待 0")
@@ -715,9 +797,13 @@ class MainWindow(QWidget):
             self.elapsed_label,
         ):
             label.setObjectName("Stat")
-            transcode_stats.addWidget(label)
-        transcode_stats.addWidget(self.transcode_rate_label)
-        transcode_stats.addStretch(1)
+        transcode_stats.addWidget(self.transcode_success_label, 0, 0)
+        transcode_stats.addWidget(self.transcode_failed_label, 0, 1)
+        transcode_stats.addWidget(self.transcode_waiting_label, 1, 0)
+        transcode_stats.addWidget(self.elapsed_label, 1, 1)
+        transcode_stats.addWidget(self.transcode_rate_label, 2, 0, 1, 2)
+        transcode_stats.setColumnStretch(0, 1)
+        transcode_stats.setColumnStretch(1, 1)
         transcode_layout.addLayout(transcode_stats)
 
         self.processing_terminal = ProcessingTerminal()
@@ -728,7 +814,9 @@ class MainWindow(QWidget):
         self.run_panel = run_panel
         run_panel.setMinimumHeight(206)
         content.addWidget(run_panel, 0)
-        root.addLayout(content, 1)
+        content.addStretch(1)
+        self.content_scroll.setWidget(content_body)
+        root.addWidget(self.content_scroll, 1)
         QTimer.singleShot(0, self._update_run_layout)
 
     def resizeEvent(self, event: object) -> None:
@@ -738,11 +826,11 @@ class MainWindow(QWidget):
     def _update_run_layout(self) -> None:
         if not hasattr(self, "run_progress_layout") or not hasattr(self, "run_panel"):
             return
-        compact = self.run_panel.width() < 640
+        compact = self.run_panel.width() < 940
         target_direction = QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
         if self.run_progress_layout.direction() != target_direction:
             self.run_progress_layout.setDirection(target_direction)
-        self.run_panel.setMinimumHeight(320 if compact else 206)
+        self.run_panel.setMinimumHeight(470 if compact else 226)
 
     def _connect(self) -> None:
         self.platform_list.currentRowChanged.connect(self.stack.setCurrentIndex)
@@ -1197,55 +1285,6 @@ class MainWindow(QWidget):
         if not text:
             return
         self.status_message.setText(text)
-
-
-def build_stylesheet() -> str:
-    return f"""
-    QWidget {{ color: {TEXT}; font-family: Microsoft YaHei UI, Segoe UI; font-size: 13px; }}
-    QWidget#RootWindow {{ background: {APP_BG}; }}
-    QFrame#Sidebar, QFrame#Panel {{ background: {PANEL_BG}; border: 1px solid {BORDER}; border-radius: 8px; }}
-    QFrame#SoftPanel {{ background: {PANEL_ALT}; border: 1px solid {BORDER}; border-radius: 8px; }}
-    QFrame#StatusBlock {{ background: #0A1117; border: 1px solid #1B2A33; border-radius: 8px; }}
-    QFrame#ProcessingTerminal {{ background: #04080C; border: 1px solid #1B3A2D; border-radius: 8px; }}
-    QStackedWidget#Stack, QScrollArea#FormScroll {{ background: transparent; border: 0; }}
-    QLabel, QCheckBox {{ background: transparent; }}
-    QLabel#Brand {{ font-size: 22px; font-weight: 700; color: {GREEN}; padding: 6px 6px; }}
-    QLabel#PageTitle {{ font-size: 21px; font-weight: 700; }}
-    QLabel#Muted, QLabel#FieldLabel {{ color: {MUTED}; }}
-    QLabel#StatusMessage {{ color: {GREEN}; font-family: Consolas, Microsoft YaHei UI; font-weight: 600; }}
-    QLabel#DecryptProgressLabel, QLabel#TranscodeProgressLabel {{ color: {TEXT}; font-weight: 700; }}
-    QLabel#AppVersion {{ color: {MUTED}; padding: 6px 4px; }}
-    QLabel#StatusOk {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; border: 1px solid {GREEN}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
-    QLabel#StatusOff {{ background: {RED_SOFT}; color: {RED_DARK}; border: 1px solid {RED}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
-    QLabel#Stat {{ background: {GREEN_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {GREEN}; font-weight: 600; }}
-    QLabel#DecodeSuccessRate, QLabel#TranscodeSuccessRate {{ background: {RED_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {RED_DARK}; font-weight: 600; }}
-    QLabel#TerminalTitle {{ color: {GREEN}; font-family: Consolas; font-size: 11px; font-weight: 700; }}
-    QLabel#TerminalLine {{ color: #66F5A9; font-family: Consolas; font-size: 10px; }}
-    QLineEdit#Input, QComboBox#Combo, QSpinBox#Spin, QSpinBox#TranscodeWorkers {{ background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER}; border-radius: 7px; padding: 5px 8px; min-height: 22px; }}
-    QLineEdit#Input:hover, QComboBox#Combo:hover, QSpinBox#Spin:hover, QSpinBox#TranscodeWorkers:hover {{ border: 1px solid {GREEN}; }}
-    QLineEdit#Input:focus, QComboBox#Combo:focus, QSpinBox#Spin:focus, QSpinBox#TranscodeWorkers:focus {{ border: 1px solid {GREEN_DARK}; }}
-    QComboBox#Combo::drop-down {{ border-left: 1px solid {CONTROL_BORDER}; width: 24px; background: {GREEN_SOFT}; border-top-right-radius: 7px; border-bottom-right-radius: 7px; }}
-    QPushButton {{ border: 1px solid #1C3C2E; border-radius: 8px; padding: 7px 14px; background: {GREEN_SOFT}; color: {GREEN}; font-weight: 600; }}
-    QPushButton#PrimaryButton {{ background: {GREEN}; color: #06100B; min-width: 112px; border: 1px solid #8CFFC3; }}
-    QPushButton#PrimaryButton:hover {{ background: {GREEN_DARK}; }}
-    QPushButton#DangerButton {{ background: {RED_SOFT}; color: {RED_DARK}; }}
-    QPushButton#DangerButton:disabled {{ background: #151C23; color: #53616D; border: 1px solid #27333C; }}
-    QPushButton#UpdateButton {{ background: {RED_SOFT}; color: {RED_DARK}; }}
-    QPushButton#UpdateButton:hover {{ background: {RED}; color: white; }}
-    QPushButton#SmallButton {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; padding: 6px 10px; }}
-    QPushButton#DisabledButton, QPushButton:disabled {{ background: #EEF0F2; color: #98A2B3; }}
-    QCheckBox {{ spacing: 10px; padding: 3px 2px; }}
-    QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {CONTROL_BORDER}; border-radius: 4px; background: {CONTROL_BG}; }}
-    QCheckBox::indicator:hover {{ border: 1px solid {GREEN_DARK}; background: {GREEN_SOFT}; }}
-    QCheckBox::indicator:checked {{ border: 1px solid {GREEN}; background: {GREEN}; }}
-    QListWidget#PlatformList {{ background: transparent; border: 0; outline: 0; }}
-    QListWidget#PlatformList::item {{ padding: 12px 10px; border-radius: 8px; margin: 2px 0; }}
-    QListWidget#PlatformList::item:selected {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; }}
-    QListWidget#PlatformList::item:hover {{ background: {RED_SOFT}; }}
-    QProgressBar#DecryptProgress, QProgressBar#TranscodeProgress {{ background: #071017; border: 0; border-radius: 6px; height: 12px; }}
-    QProgressBar#DecryptProgress::chunk {{ background: {GREEN}; border-radius: 6px; }}
-    QProgressBar#TranscodeProgress::chunk {{ background: {RED}; border-radius: 6px; }}
-    """
 
 
 def main() -> int:

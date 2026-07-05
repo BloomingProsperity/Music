@@ -5,9 +5,9 @@ import pathlib
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QPoint, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox, QWidget
+from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QComboBox, QFrame, QLabel, QListView, QMessageBox, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox, QWidget
 
 from src.Presentation.ui_app import MainWindow, build_stylesheet
 
@@ -315,6 +315,55 @@ def test_ui_keeps_output_open_and_artist_grouping_controls() -> None:
     assert workers.maximum() >= 999
 
 
+def test_qq_page_uses_one_output_format_control_and_expands_rules() -> None:
+    _app()
+    window = MainWindow()
+    page = window.pages["qq"]
+
+    combos = list(page.format_widgets.values())
+    labels = [label.text() for label in page.format_box.findChildren(QLabel, "FieldLabel")]
+
+    assert len(combos) == 1
+    assert page.findChild(QComboBox, "QQOutputFormat") is combos[0]
+    assert labels == ["输出格式"]
+
+    combos[0].setCurrentText("wav")
+
+    assert page.format_values() == {"mflac": "wav", "mgg": "wav", "mmp4": "wav"}
+
+
+def test_qq_single_output_format_loads_legacy_rules_when_values_match() -> None:
+    _app()
+    window = MainWindow()
+    page = window.pages["qq"]
+
+    page.set_format_values({"mflac": "flac", "mgg": "flac", "mmp4": "flac"})
+
+    combo = page.findChild(QComboBox, "QQOutputFormat")
+    assert combo is not None
+    assert combo.currentText() == "flac"
+
+
+def test_single_output_format_panel_matches_options_spacing() -> None:
+    app = _app()
+    window = MainWindow()
+    window.resize(900, 680)
+    window.show()
+    app.processEvents()
+
+    for row, platform_id in ((0, "qq"), (2, "netease"), (3, "kuwo")):
+        window.platform_list.setCurrentRow(row)
+        app.processEvents()
+        page = window.pages[platform_id]
+        labels = [label.text() for label in page.format_box.findChildren(QLabel, "FieldLabel")]
+
+        assert page.format_box.objectName() == "FormatPanel"
+        assert labels == ["输出格式"]
+        assert page.config_layout.spacing() >= 18
+        assert page.format_box.height() >= page.format_box.sizeHint().height()
+        assert page.options_panel.y() - page.format_box.geometry().bottom() >= 18
+
+
 def test_file_finished_updates_progress_counts_immediately() -> None:
     app = _app()
     window = MainWindow()
@@ -426,7 +475,7 @@ def test_sidebar_shows_default_version_and_update_button() -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
 
     assert version is not None
-    assert version.text() == "0.20"
+    assert version.text() == "0.21"
     assert update_button is not None
     assert update_button.text() == "更新系统"
 
@@ -534,11 +583,47 @@ def test_update_button_runs_update_service_and_logs_result(monkeypatch) -> None:
 def test_form_controls_have_visible_control_frames() -> None:
     stylesheet = build_stylesheet()
 
+    assert "#F5A524" in stylesheet
+    assert "#14110D" in stylesheet
     assert "QComboBox#Combo" in stylesheet
-    assert "background: #080D12" in stylesheet
+    assert "QSpinBox#TranscodeWorkers" in stylesheet
+    assert "QPushButton#OpenOutputButton" in stylesheet
+    assert "QLabel#DecodeSuccessRate" in stylesheet
+    assert "background: #120F0B" in stylesheet
     assert "QCheckBox::indicator" in stylesheet
-    assert "border: 1px solid #32424C" in stylesheet
+    assert "border: 1px solid #473A28" in stylesheet
     assert "QPushButton#DangerButton:disabled" in stylesheet
+    assert "QComboBox#Combo:on" in stylesheet
+    assert "QComboBox#QQOutputFormat:on" in stylesheet
+    assert "QListView#ComboPopup" in stylesheet
+    assert "QListView#ComboPopup::item:hover" in stylesheet
+    assert "QListView#ComboPopup::item:selected" in stylesheet
+
+
+def test_combo_boxes_use_styled_popup_view() -> None:
+    _app()
+    window = MainWindow()
+
+    combo_boxes = window.findChildren(QComboBox)
+
+    assert combo_boxes
+    for combo in combo_boxes:
+        view = combo.view()
+        assert isinstance(view, QListView)
+        assert view.objectName() == "ComboPopup"
+        assert view.hasMouseTracking() is True
+        assert view.spacing() == 4
+
+
+def test_matrix_rain_uses_studio_amber_theme_without_idle_glyphs() -> None:
+    _app()
+    window = MainWindow()
+
+    matrix = window.findChild(QWidget, "MatrixRain")
+    assert matrix is not None
+    assert matrix.property("themeAccent") == "#F5A524"
+    assert matrix.property("themeBackground") == "#0D0B08"
+    assert matrix.property("glyphsVisible") is False
 
 
 def test_run_panel_removes_black_log_box() -> None:
@@ -561,3 +646,91 @@ def test_run_progress_layout_stacks_when_window_is_narrow() -> None:
     app.processEvents()
 
     assert window.run_progress_layout.direction() == QBoxLayout.Direction.LeftToRight
+
+
+def test_main_content_uses_gallery_style_scroll_without_nested_form_clipping() -> None:
+    app = _app()
+    window = MainWindow()
+    window.resize(900, 680)
+    window.show()
+    app.processEvents()
+
+    content_scroll = window.findChild(QScrollArea, "ContentScroll")
+    form_scroll = window.pages["qq"].findChild(QScrollArea, "FormScroll")
+
+    assert content_scroll is not None
+    assert form_scroll is not None
+    assert form_scroll.verticalScrollBar().maximum() == 0
+    assert content_scroll.verticalScrollBar().maximum() > 0
+
+
+def test_compact_run_stats_keep_full_text_visible() -> None:
+    app = _app()
+    window = MainWindow()
+    window.resize(900, 680)
+    window.show()
+    app.processEvents()
+
+    labels = [
+        window.success_label,
+        window.failed_label,
+        window.skipped_label,
+        window.decode_rate_label,
+        window.transcode_success_label,
+        window.transcode_failed_label,
+        window.transcode_waiting_label,
+        window.elapsed_label,
+        window.transcode_rate_label,
+    ]
+
+    for label in labels:
+        assert label.width() >= label.sizeHint().width()
+
+
+def test_path_row_action_buttons_align_across_input_and_output_rows() -> None:
+    app = _app()
+    window = MainWindow()
+    window.resize(900, 680)
+    window.show()
+    app.processEvents()
+
+    page = window.pages["qq"]
+    input_dir_x = page.input_path.dir_button.mapTo(window, QPoint(0, 0)).x()
+    output_dir_x = page.output_dir.dir_button.mapTo(window, QPoint(0, 0)).x()
+    input_file_x = page.input_path.file_button.mapTo(window, QPoint(0, 0)).x()
+    output_open_x = page.output_dir.open_button.mapTo(window, QPoint(0, 0)).x()
+
+    assert input_dir_x == output_dir_x
+    assert input_file_x == output_open_x
+
+
+def test_path_rows_stack_actions_before_path_field_gets_cramped() -> None:
+    app = _app()
+    window = MainWindow()
+    window.resize(900, 680)
+    window.show()
+    app.processEvents()
+
+    page = window.pages["qq"]
+
+    assert page.input_path.layout_mode == "stacked"
+    assert page.output_dir.layout_mode == "stacked"
+    assert page.input_path.edit.width() >= page.input_path.width() - 8
+    assert page.output_dir.edit.width() >= page.output_dir.width() - 8
+    assert page.input_path.dir_button.y() > page.input_path.edit.y()
+    assert page.output_dir.dir_button.y() > page.output_dir.edit.y()
+
+
+def test_major_ui_boxes_use_fixed_spacing() -> None:
+    _app()
+    window = MainWindow()
+    page = window.pages["qq"]
+    content_body = window.findChild(QScrollArea, "ContentScroll").widget()
+
+    assert window.layout().spacing() == 18
+    assert content_body.layout().spacing() == 18
+    assert page.layout().spacing() == 18
+    assert page.form_layout.spacing() == 18
+    assert page.config_layout.spacing() == 18
+    assert window.run_panel.layout().spacing() == 18
+    assert window.run_progress_layout.spacing() == 18

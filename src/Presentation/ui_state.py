@@ -11,6 +11,7 @@ from src.Infrastructure.file_catalog import file_requires_kgg_db
 
 
 TARGET_FORMATS = ("mp3", "flac", "m4a", "wav")
+QQ_FORMAT_RULE_KEYS = ("mflac", "mgg", "mmp4")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +48,7 @@ class PlatformRunOptions:
     bitrate_kbps: int | None = 320
     qq_fetch_missing_ekey: bool = True
     qq_cache_ekeys: bool = True
-    format_rules: dict[str, str] = field(default_factory=lambda: {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"})
+    format_rules: dict[str, str] = field(default_factory=lambda: {key: "mp3" for key in QQ_FORMAT_RULE_KEYS})
     platform_settings: dict[str, Any] = field(default_factory=dict)
     event_sink: Any | None = None
     stop_requested: Any | None = None
@@ -68,9 +69,7 @@ def platform_specs() -> list[PlatformSpec]:
             subtitle=".mflac / .mgg / .mmp4",
             source_extensions=(".mflac", ".mgg", ".mmp4"),
             format_controls=(
-                FormatControlSpec("mflac", "mflac 输出格式"),
-                FormatControlSpec("mgg", "mgg 输出格式"),
-                FormatControlSpec("mmp4", "mmp4 输出格式"),
+                FormatControlSpec("qq_output_format", "输出格式"),
             ),
             enabled=True,
             status_text="可用",
@@ -93,7 +92,7 @@ def platform_specs() -> list[PlatformSpec]:
             subtitle=".ncm",
             source_extensions=(".ncm",),
             format_controls=(
-                FormatControlSpec("target_format_ncm", "ncm 输出格式", ("auto", *TARGET_FORMATS), "auto"),
+                FormatControlSpec("target_format_ncm", "输出格式", ("auto", *TARGET_FORMATS), "auto"),
             ),
             enabled=True,
             status_text="可用",
@@ -104,7 +103,7 @@ def platform_specs() -> list[PlatformSpec]:
             subtitle=".kwm / .kwma / .kwm.flac",
             source_extensions=(".kwm", ".kwma", ".kwm.flac"),
             format_controls=(
-                FormatControlSpec("target_format_kwm", "kwm 输出格式", ("auto", *TARGET_FORMATS), "auto"),
+                FormatControlSpec("target_format_kwm", "输出格式", ("auto", *TARGET_FORMATS), "auto"),
             ),
             enabled=True,
             status_text="可用",
@@ -117,7 +116,7 @@ def _clamp_workers(value: int) -> int:
 
 
 def _normalize_format_rules(raw: dict[str, str]) -> dict[str, str]:
-    defaults = {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"}
+    defaults = {key: "mp3" for key in QQ_FORMAT_RULE_KEYS}
     normalized = dict(defaults)
     for key in defaults:
         value = str(raw.get(key, defaults[key]) or defaults[key]).strip().lower()
