@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import pathlib
+import random
 import sys
 import threading
 import time
 from typing import Any
 
 from PySide6.QtCore import QObject, QTimer, Qt, Signal, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
@@ -54,20 +55,20 @@ from src.Presentation.ui_state import (
 
 UPDATE_CHECK_DELAY_MS = 100
 
-APP_BG = "#F7F8F6"
-PANEL_BG = "#FFFFFF"
-PANEL_ALT = "#FBF7F7"
-BORDER = "#E6E2DF"
-TEXT = "#1F2933"
-MUTED = "#667085"
-GREEN = "#79C69B"
-GREEN_DARK = "#257A53"
-GREEN_SOFT = "#E4F6EC"
-RED = "#E9A0A7"
-RED_DARK = "#AA4754"
-RED_SOFT = "#FBE8EA"
-CONTROL_BG = "#FFFDF9"
-CONTROL_BORDER = "#B8C7BC"
+APP_BG = "#070B10"
+PANEL_BG = "#0F151D"
+PANEL_ALT = "#111B22"
+BORDER = "#22303B"
+TEXT = "#E5F4EC"
+MUTED = "#8B9AA7"
+GREEN = "#37E68B"
+GREEN_DARK = "#0FBF72"
+GREEN_SOFT = "#122B22"
+RED = "#FF5D73"
+RED_DARK = "#FF7A8C"
+RED_SOFT = "#321820"
+CONTROL_BG = "#080D12"
+CONTROL_BORDER = "#32424C"
 
 
 def _format_seconds(value: float) -> str:
@@ -82,6 +83,145 @@ class UiBridge(QObject):
     log_message = Signal(str)
     update_checked = Signal(object)
     update_finished = Signal(bool)
+
+
+class MatrixRainWidget(QWidget):
+    _glyphs = "01010110ABCDEF89"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("MatrixRain")
+        self.setMinimumHeight(42)
+        self.setAutoFillBackground(False)
+        self._processing = False
+        self._rng = random.Random(20260704)
+        self._drops: list[int] = []
+        self._frame = 0
+        self._timer = QTimer(self)
+        self._timer.setObjectName("MatrixRainTimer")
+        self._timer.timeout.connect(self._tick)
+        self.setProperty("processing", False)
+        self.setProperty("glyphs", self._glyphs)
+        self.setProperty("glyphsVisible", False)
+
+    def set_processing(self, processing: bool) -> None:
+        self._processing = bool(processing)
+        self.setProperty("processing", self._processing)
+        if self._processing:
+            self._timer.start(42)
+        else:
+            self._timer.stop()
+        self.setProperty("glyphsVisible", self._processing)
+        self.update()
+
+    def resizeEvent(self, event: object) -> None:
+        super().resizeEvent(event)  # type: ignore[arg-type]
+        self._reset_columns()
+
+    def _reset_columns(self) -> None:
+        column_count = max(1, self.width() // 13)
+        row_count = max(4, self.height() // 13)
+        self._drops = [self._rng.randint(-row_count, row_count) for _ in range(column_count)]
+
+    def _tick(self) -> None:
+        if not self._drops:
+            self._reset_columns()
+        rows = max(4, self.height() // 13)
+        speed = 2 if self._processing else 1
+        for index, value in enumerate(self._drops):
+            next_value = value + speed
+            if next_value > rows + self._rng.randint(0, 6):
+                next_value = self._rng.randint(-rows, 0)
+            self._drops[index] = next_value
+        self._frame += speed
+        self.update()
+
+    def paintEvent(self, event: object) -> None:
+        super().paintEvent(event)  # type: ignore[arg-type]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, False)
+        painter.fillRect(self.rect(), QColor(4, 8, 12, 245))
+        if not self._processing:
+            return
+        painter.setFont(QFont("Consolas", 9))
+        head_alpha = 230 if self._processing else 130
+        tail_alpha = 82 if self._processing else 42
+        for column, drop in enumerate(self._drops):
+            x = column * 13 + 2
+            for trail in range(5):
+                y = (drop - trail) * 13
+                if y < -13 or y > self.height() + 13:
+                    continue
+                glyph = self._glyphs[(column * 7 + trail + self._frame) % len(self._glyphs)]
+                alpha = head_alpha if trail == 0 else max(18, tail_alpha - trail * 12)
+                painter.setPen(QColor(55, 230, 139, alpha))
+                painter.drawText(x, y, glyph)
+
+
+class ProcessingTerminal(QFrame):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("ProcessingTerminal")
+        self.setMinimumWidth(180)
+        self.setMinimumHeight(118)
+        self._rng = random.Random(3917)
+        self._processing = False
+        self._stage = "IDLE"
+        self._file_name = "-"
+        self._progress = 0
+        self._address = 0x4A90
+        self._lines: list[QLabel] = []
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(3)
+        title = QLabel("PROCESSING TERMINAL")
+        title.setObjectName("TerminalTitle")
+        layout.addWidget(title)
+        for _ in range(4):
+            label = QLabel("")
+            label.setObjectName("TerminalLine")
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            self._lines.append(label)
+            layout.addWidget(label)
+        layout.addStretch(1)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self.setProperty("processing", False)
+        self.render_event("idle", "-", 0)
+
+    def set_processing(self, processing: bool) -> None:
+        self._processing = bool(processing)
+        self.setProperty("processing", self._processing)
+        if self._processing and not self._timer.isActive():
+            self._timer.start(160)
+        elif not self._processing and self._timer.isActive():
+            self._timer.stop()
+        self._refresh_lines()
+
+    def render_event(self, stage: str, file_name: str = "", progress: int = 0) -> None:
+        self._stage = (stage or "idle").upper()
+        if file_name:
+            self._file_name = pathlib.Path(str(file_name)).name or "-"
+        self._progress = max(0, min(100, int(progress or 0)))
+        self._tick()
+
+    def _tick(self) -> None:
+        self._address = (self._address + self._rng.randint(0x20, 0x1FF)) & 0xFFFFFF
+        self._refresh_lines()
+
+    def _refresh_lines(self) -> None:
+        mask = self._rng.getrandbits(16)
+        lane = self._rng.getrandbits(8)
+        lines = [
+            f"[SYS_XOR_STREAM] ADDR:0x{self._address:06X} MASK:0x{mask:04X}",
+            f"[PIPE_STAGE] {self._stage:<11} FILE:{self._file_name}",
+            f"[BLOCK_MAP] LANE:{lane:02X} PROGRESS:{self._progress:03d}% CACHE:HOT",
+            "[VERIFY_BUS] PCM -> CONTAINER -> PLAYABLE",
+        ]
+        for label, text in zip(self._lines, lines):
+            label.setText(text)
 
 
 class PathRow(QWidget):
@@ -496,7 +636,10 @@ class MainWindow(QWidget):
         self.status_message.setObjectName("StatusMessage")
         self.status_message.setWordWrap(True)
         self.status_message.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.matrix_rain = MatrixRainWidget()
+        self.matrix_rain.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         top.addWidget(self.status_message, 1)
+        top.addWidget(self.matrix_rain, 2)
         top.addWidget(self.stop_button)
         run_layout.addLayout(top)
 
@@ -577,11 +720,13 @@ class MainWindow(QWidget):
         transcode_stats.addStretch(1)
         transcode_layout.addLayout(transcode_stats)
 
+        self.processing_terminal = ProcessingTerminal()
         self.run_progress_layout.addWidget(decrypt_card, 1)
         self.run_progress_layout.addWidget(transcode_card, 1)
+        self.run_progress_layout.addWidget(self.processing_terminal, 1)
         run_layout.addLayout(self.run_progress_layout)
         self.run_panel = run_panel
-        run_panel.setMinimumHeight(166)
+        run_panel.setMinimumHeight(206)
         content.addWidget(run_panel, 0)
         root.addLayout(content, 1)
         QTimer.singleShot(0, self._update_run_layout)
@@ -593,11 +738,11 @@ class MainWindow(QWidget):
     def _update_run_layout(self) -> None:
         if not hasattr(self, "run_progress_layout") or not hasattr(self, "run_panel"):
             return
-        compact = self.run_panel.width() < 720
+        compact = self.run_panel.width() < 640
         target_direction = QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
         if self.run_progress_layout.direction() != target_direction:
             self.run_progress_layout.setDirection(target_direction)
-        self.run_panel.setMinimumHeight(244 if compact else 166)
+        self.run_panel.setMinimumHeight(320 if compact else 206)
 
     def _connect(self) -> None:
         self.platform_list.currentRowChanged.connect(self.stack.setCurrentIndex)
@@ -812,6 +957,7 @@ class MainWindow(QWidget):
         self._render_transcode_counts()
         self.elapsed_label.setText("耗时 0.0s")
         self.status_message.setText("准备开始")
+        self.processing_terminal.render_event("idle", "-", 0)
 
     def _reset_run_counts(self) -> None:
         self._run_counts = {"success": 0, "failed": 0, "skipped": 0}
@@ -923,6 +1069,8 @@ class MainWindow(QWidget):
             page.set_busy(busy)
         self.stop_button.setEnabled(busy)
         self.update_button.setEnabled(not busy and not self.updating)
+        self.matrix_rain.set_processing(busy)
+        self.processing_terminal.set_processing(busy)
 
     def _handle_run_event(self, event_name: str, payload: object) -> None:
         data = payload if isinstance(payload, dict) else {}
@@ -936,17 +1084,21 @@ class MainWindow(QWidget):
             self.transcode_progress_label.setText("转码 0 / 0")
             self.transcode_current_file.setText("当前文件 -")
             self._set_run_progress(0, total)
+            self.processing_terminal.render_event("scan", f"{total} files", 0)
             self._append_log(f"候选文件 {total}")
             return
         if event_name == "file_started":
-            self.current_file.setText(f"当前文件 {pathlib.Path(str(data.get('input_path', ''))).name}")
+            name = pathlib.Path(str(data.get("input_path", ""))).name
+            self.current_file.setText(f"当前文件 {name}")
             self._set_run_progress(total=total)
+            self.processing_terminal.render_event("decryption", name, self.progress.value())
             return
         if event_name == "file_decrypted":
             name = pathlib.Path(str(data.get("input_path", ""))).name
             self.current_file.setText(f"当前文件 {name}")
             self._record_decrypted(self._payload_input_id(data))
             self._set_run_progress(total=total)
+            self.processing_terminal.render_event("xor-ready", name, self.progress.value())
             message = str(data.get("message") or event_name)
             self._append_log(message)
             return
@@ -958,6 +1110,7 @@ class MainWindow(QWidget):
             self._record_file_result(result, self._payload_input_id(data))
             completed = self._payload_int(data, "completed")
             self._set_run_progress(completed if completed else None, total)
+            self.processing_terminal.render_event(result or "finished", name, self.progress.value())
             reason = str(data.get("reason") or result)
             self._append_log(f"{name}: {reason}")
             if result == "failed" and "qq_client_required" in reason and not self.client_hint_shown:
@@ -970,6 +1123,7 @@ class MainWindow(QWidget):
             self._transcode_counts = {"success": 0, "failed": 0, "waiting": pending}
             self._render_transcode_counts()
             self._set_transcode_progress(0, pending)
+            self.processing_terminal.render_event("transcoding", f"{pending} jobs", 0)
             self._append_log(f"统一转码 {pending}")
             return
         if event_name == "batch_transcode_progress":
@@ -988,6 +1142,7 @@ class MainWindow(QWidget):
             self._transcode_counts = {"success": success, "failed": failed, "waiting": max(0, waiting)}
             self._render_transcode_counts()
             self._set_transcode_progress(completed, transcode_total)
+            self.processing_terminal.render_event("transcoding", name, self.transcode_progress.value())
             self._append_log(str(data.get("message") or event_name))
             return
         if event_name == "batch_finished":
@@ -1006,6 +1161,7 @@ class MainWindow(QWidget):
             report = str(data.get("batch_report_txt") or "")
             if report:
                 self._append_log(f"报告 {report}")
+            self.processing_terminal.render_event("done", "batch", self.progress.value())
 
     def _handle_run_finished(self, result_code: int) -> None:
         self.running = False
@@ -1049,27 +1205,31 @@ def build_stylesheet() -> str:
     QWidget#RootWindow {{ background: {APP_BG}; }}
     QFrame#Sidebar, QFrame#Panel {{ background: {PANEL_BG}; border: 1px solid {BORDER}; border-radius: 8px; }}
     QFrame#SoftPanel {{ background: {PANEL_ALT}; border: 1px solid {BORDER}; border-radius: 8px; }}
-    QFrame#StatusBlock {{ background: transparent; border: 0; }}
+    QFrame#StatusBlock {{ background: #0A1117; border: 1px solid #1B2A33; border-radius: 8px; }}
+    QFrame#ProcessingTerminal {{ background: #04080C; border: 1px solid #1B3A2D; border-radius: 8px; }}
     QStackedWidget#Stack, QScrollArea#FormScroll {{ background: transparent; border: 0; }}
     QLabel, QCheckBox {{ background: transparent; }}
-    QLabel#Brand {{ font-size: 22px; font-weight: 700; color: {GREEN_DARK}; padding: 6px 6px; }}
+    QLabel#Brand {{ font-size: 22px; font-weight: 700; color: {GREEN}; padding: 6px 6px; }}
     QLabel#PageTitle {{ font-size: 21px; font-weight: 700; }}
     QLabel#Muted, QLabel#FieldLabel {{ color: {MUTED}; }}
-    QLabel#StatusMessage {{ color: {MUTED}; }}
+    QLabel#StatusMessage {{ color: {GREEN}; font-family: Consolas, Microsoft YaHei UI; font-weight: 600; }}
     QLabel#DecryptProgressLabel, QLabel#TranscodeProgressLabel {{ color: {TEXT}; font-weight: 700; }}
     QLabel#AppVersion {{ color: {MUTED}; padding: 6px 4px; }}
     QLabel#StatusOk {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; border: 1px solid {GREEN}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
     QLabel#StatusOff {{ background: {RED_SOFT}; color: {RED_DARK}; border: 1px solid {RED}; border-radius: 8px; padding: 6px 10px; font-weight: 600; }}
-    QLabel#Stat {{ background: {GREEN_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {GREEN_DARK}; font-weight: 600; }}
+    QLabel#Stat {{ background: {GREEN_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {GREEN}; font-weight: 600; }}
     QLabel#DecodeSuccessRate, QLabel#TranscodeSuccessRate {{ background: {RED_SOFT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px 10px; color: {RED_DARK}; font-weight: 600; }}
+    QLabel#TerminalTitle {{ color: {GREEN}; font-family: Consolas; font-size: 11px; font-weight: 700; }}
+    QLabel#TerminalLine {{ color: #66F5A9; font-family: Consolas; font-size: 10px; }}
     QLineEdit#Input, QComboBox#Combo, QSpinBox#Spin, QSpinBox#TranscodeWorkers {{ background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER}; border-radius: 7px; padding: 5px 8px; min-height: 22px; }}
     QLineEdit#Input:hover, QComboBox#Combo:hover, QSpinBox#Spin:hover, QSpinBox#TranscodeWorkers:hover {{ border: 1px solid {GREEN}; }}
     QLineEdit#Input:focus, QComboBox#Combo:focus, QSpinBox#Spin:focus, QSpinBox#TranscodeWorkers:focus {{ border: 1px solid {GREEN_DARK}; }}
     QComboBox#Combo::drop-down {{ border-left: 1px solid {CONTROL_BORDER}; width: 24px; background: {GREEN_SOFT}; border-top-right-radius: 7px; border-bottom-right-radius: 7px; }}
-    QPushButton {{ border: 0; border-radius: 8px; padding: 7px 14px; background: {GREEN_SOFT}; color: {GREEN_DARK}; font-weight: 600; }}
-    QPushButton#PrimaryButton {{ background: {GREEN}; color: white; min-width: 112px; }}
+    QPushButton {{ border: 1px solid #1C3C2E; border-radius: 8px; padding: 7px 14px; background: {GREEN_SOFT}; color: {GREEN}; font-weight: 600; }}
+    QPushButton#PrimaryButton {{ background: {GREEN}; color: #06100B; min-width: 112px; border: 1px solid #8CFFC3; }}
     QPushButton#PrimaryButton:hover {{ background: {GREEN_DARK}; }}
     QPushButton#DangerButton {{ background: {RED_SOFT}; color: {RED_DARK}; }}
+    QPushButton#DangerButton:disabled {{ background: #151C23; color: #53616D; border: 1px solid #27333C; }}
     QPushButton#UpdateButton {{ background: {RED_SOFT}; color: {RED_DARK}; }}
     QPushButton#UpdateButton:hover {{ background: {RED}; color: white; }}
     QPushButton#SmallButton {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; padding: 6px 10px; }}
@@ -1077,12 +1237,12 @@ def build_stylesheet() -> str:
     QCheckBox {{ spacing: 10px; padding: 3px 2px; }}
     QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {CONTROL_BORDER}; border-radius: 4px; background: {CONTROL_BG}; }}
     QCheckBox::indicator:hover {{ border: 1px solid {GREEN_DARK}; background: {GREEN_SOFT}; }}
-    QCheckBox::indicator:checked {{ border: 1px solid {GREEN_DARK}; background: {GREEN}; }}
+    QCheckBox::indicator:checked {{ border: 1px solid {GREEN}; background: {GREEN}; }}
     QListWidget#PlatformList {{ background: transparent; border: 0; outline: 0; }}
     QListWidget#PlatformList::item {{ padding: 12px 10px; border-radius: 8px; margin: 2px 0; }}
     QListWidget#PlatformList::item:selected {{ background: {GREEN_SOFT}; color: {GREEN_DARK}; }}
     QListWidget#PlatformList::item:hover {{ background: {RED_SOFT}; }}
-    QProgressBar#DecryptProgress, QProgressBar#TranscodeProgress {{ background: #EEF0F2; border: 0; border-radius: 6px; height: 12px; }}
+    QProgressBar#DecryptProgress, QProgressBar#TranscodeProgress {{ background: #071017; border: 0; border-radius: 6px; height: 12px; }}
     QProgressBar#DecryptProgress::chunk {{ background: {GREEN}; border-radius: 6px; }}
     QProgressBar#TranscodeProgress::chunk {{ background: {RED}; border-radius: 6px; }}
     """

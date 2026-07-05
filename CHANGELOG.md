@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.20 - 2026-07-05
+
+- 重构 UI 为深色处理面板，并新增运行态代码雨和处理终端动效。
+
 ## 0.19 - 2026-07-04
 
 - QQ 缺少 ekey 时自动尝试启动本机 QQ 音乐；未检测到客户端时提示安装。

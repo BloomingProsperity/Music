@@ -5,8 +5,9 @@ import pathlib
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox
+from PySide6.QtWidgets import QApplication, QBoxLayout, QCheckBox, QFrame, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QProgressBar, QScrollArea, QSpinBox, QWidget
 
 from src.Presentation.ui_app import MainWindow, build_stylesheet
 
@@ -212,6 +213,75 @@ def test_ui_splits_decrypt_and_transcode_progress() -> None:
     assert window.findChild(QLabel, "TranscodeSuccessRate").text() == "转码成功率 100%"
 
 
+def test_processing_visual_effects_follow_busy_state() -> None:
+    _app()
+    window = MainWindow()
+
+    matrix = window.findChild(QWidget, "MatrixRain")
+    terminal = window.findChild(QFrame, "ProcessingTerminal")
+
+    assert matrix is not None
+    assert terminal is not None
+    assert matrix.property("processing") is False
+    assert terminal.property("processing") is False
+
+    window._set_busy(True)
+
+    assert matrix.property("processing") is True
+    assert terminal.property("processing") is True
+
+    window._set_busy(False)
+
+    assert matrix.property("processing") is False
+    assert terminal.property("processing") is False
+
+
+def test_matrix_rain_stays_idle_until_processing_and_uses_safe_glyphs() -> None:
+    _app()
+    window = MainWindow()
+
+    matrix = window.findChild(QWidget, "MatrixRain")
+    assert matrix is not None
+    timer = matrix.findChild(QTimer, "MatrixRainTimer")
+    assert timer is not None
+
+    glyphs = str(matrix.property("glyphs") or "")
+    assert glyphs
+    assert all(ord(char) < 128 for char in glyphs)
+    assert timer.isActive() is False
+    assert matrix.property("glyphsVisible") is False
+
+    window._set_busy(True)
+    assert timer.isActive() is True
+    assert matrix.property("glyphsVisible") is True
+
+    window._set_busy(False)
+    assert timer.isActive() is False
+    assert matrix.property("glyphsVisible") is False
+
+
+def test_processing_terminal_receives_stream_lines_from_run_events() -> None:
+    app = _app()
+    window = MainWindow()
+
+    window._handle_run_event(
+        "file_started",
+        {
+            "input_path": r"C:\music\alpha.mflac",
+            "total": 3,
+        },
+    )
+    app.processEvents()
+
+    terminal = window.findChild(QFrame, "ProcessingTerminal")
+    assert terminal is not None
+    lines = "\n".join(label.text() for label in terminal.findChildren(QLabel, "TerminalLine"))
+
+    assert "alpha.mflac" in lines
+    assert "[SYS_XOR_STREAM]" in lines
+    assert "ADDR:0x" in lines
+
+
 def test_batch_finished_without_total_keeps_existing_total_for_stopped_run() -> None:
     app = _app()
     window = MainWindow()
@@ -356,7 +426,7 @@ def test_sidebar_shows_default_version_and_update_button() -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
 
     assert version is not None
-    assert version.text() == "0.19"
+    assert version.text() == "0.20"
     assert update_button is not None
     assert update_button.text() == "更新系统"
 
@@ -465,9 +535,10 @@ def test_form_controls_have_visible_control_frames() -> None:
     stylesheet = build_stylesheet()
 
     assert "QComboBox#Combo" in stylesheet
-    assert "background: #FFFDF9" in stylesheet
+    assert "background: #080D12" in stylesheet
     assert "QCheckBox::indicator" in stylesheet
-    assert "border: 1px solid #B8C7BC" in stylesheet
+    assert "border: 1px solid #32424C" in stylesheet
+    assert "QPushButton#DangerButton:disabled" in stylesheet
 
 
 def test_run_panel_removes_black_log_box() -> None:
