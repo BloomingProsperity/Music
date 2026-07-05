@@ -475,7 +475,7 @@ def test_sidebar_shows_default_version_and_update_button() -> None:
     update_button = window.findChild(QPushButton, "UpdateButton")
 
     assert version is not None
-    assert version.text() == "0.21"
+    assert version.text() == "0.22"
     assert update_button is not None
     assert update_button.text() == "更新系统"
 

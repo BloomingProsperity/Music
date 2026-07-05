@@ -203,7 +203,7 @@ def _runtime_paths_for_test(root: pathlib.Path) -> RuntimePaths:
     )
 
 
-def _assert_decodable_mp3(path: pathlib.Path, ffmpeg_path: pathlib.Path) -> None:
+def _assert_decodable_audio(path: pathlib.Path, ffmpeg_path: pathlib.Path) -> None:
     completed = subprocess.run(
         [str(ffmpeg_path), "-v", "error", "-i", str(path), "-f", "null", os.devnull],
         capture_output=True,
@@ -215,18 +215,19 @@ def _assert_decodable_mp3(path: pathlib.Path, ffmpeg_path: pathlib.Path) -> None
     assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
-def _run_batch_to_mp3(
+def _run_batch_to_format(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
     platform_id: str,
     adapter,
     input_file: pathlib.Path,
     settings: dict,
+    target_format: str,
 ) -> pathlib.Path:
     runtime_paths = _runtime_paths_for_test(tmp_path)
     monkeypatch.setattr(RuntimePaths, "discover", classmethod(lambda cls: runtime_paths))
     input_dir = tmp_path / "input"
-    output_dir = tmp_path / "mp3"
+    output_dir = tmp_path / target_format
     input_dir.mkdir()
     input_file.replace(input_dir / input_file.name)
     config = BatchRunConfig(
@@ -249,9 +250,20 @@ def _run_batch_to_mp3(
     result_code = run_batch(config, adapter)
 
     assert result_code == 0
-    mp3_files = sorted(output_dir.glob("*.mp3"))
-    assert len(mp3_files) == 1
-    return mp3_files[0]
+    output_files = sorted(output_dir.glob(f"*.{target_format}"))
+    assert len(output_files) == 1
+    return output_files[0]
+
+
+def _run_batch_to_mp3(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform_id: str,
+    adapter,
+    input_file: pathlib.Path,
+    settings: dict,
+) -> pathlib.Path:
+    return _run_batch_to_format(tmp_path, monkeypatch, platform_id, adapter, input_file, settings, "mp3")
 
 
 def test_netease_batch_decrypts_and_transcodes_synthetic_ncm_to_decodable_mp3(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -270,7 +282,7 @@ def test_netease_batch_decrypts_and_transcodes_synthetic_ncm_to_decodable_mp3(tm
         {"target_format_ncm": "mp3"},
     )
 
-    _assert_decodable_mp3(mp3_path, ffmpeg_path)
+    _assert_decodable_audio(mp3_path, ffmpeg_path)
 
 
 def test_qq_batch_decrypts_and_transcodes_synthetic_mflac_to_decodable_mp3(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -290,7 +302,7 @@ def test_qq_batch_decrypts_and_transcodes_synthetic_mflac_to_decodable_mp3(tmp_p
         {"format_rules": {"mflac": "mp3", "mgg": "mp3", "mmp4": "mp3"}},
     )
 
-    _assert_decodable_mp3(mp3_path, ffmpeg_path)
+    _assert_decodable_audio(mp3_path, ffmpeg_path)
 
 
 def test_kuwo_batch_decrypts_and_transcodes_synthetic_kwm_to_decodable_mp3(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,7 +321,7 @@ def test_kuwo_batch_decrypts_and_transcodes_synthetic_kwm_to_decodable_mp3(tmp_p
         {"target_format_kwm": "mp3"},
     )
 
-    _assert_decodable_mp3(mp3_path, ffmpeg_path)
+    _assert_decodable_audio(mp3_path, ffmpeg_path)
 
 
 def test_kugou_batch_decrypts_and_transcodes_synthetic_kgm_to_decodable_mp3(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,4 +342,46 @@ def test_kugou_batch_decrypts_and_transcodes_synthetic_kgm_to_decodable_mp3(tmp_
         {"target_format_kgma": "mp3", "key_file": str(key_path)},
     )
 
-    _assert_decodable_mp3(mp3_path, ffmpeg_path)
+    _assert_decodable_audio(mp3_path, ffmpeg_path)
+
+
+@pytest.mark.parametrize("target_format", ["flac", "m4a", "wav"])
+@pytest.mark.parametrize("platform_id", ["qq", "kugou", "netease", "kuwo"])
+def test_supported_platforms_transcode_synthetic_audio_to_requested_format(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform_id: str,
+    target_format: str,
+) -> None:
+    ffmpeg_path = resolve_ffmpeg_path(RuntimePaths.discover())
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg executable is not available")
+
+    payload = _wav_payload()
+    if platform_id == "qq":
+        source = tmp_path / "local_e2e.mflac"
+        _write_qq_mflac_fixture(source, payload)
+        monkeypatch.setattr(musicex_offline, "decrypt_qmc2_buffer_fast", lambda _key, _buffer, _offset: False)
+        adapter = QQPlatformAdapter()
+        settings = {"format_rules": {"mflac": target_format, "mgg": target_format, "mmp4": target_format}}
+    elif platform_id == "kugou":
+        source = tmp_path / "local_e2e.kgm"
+        key_path = tmp_path / "kugou_key.xz"
+        _write_kugou_v3_fixture(source, key_path, payload)
+        monkeypatch.setattr(kugou_decoder, "get_native_backend", lambda: SimpleNamespace(available=False, dll_path=None))
+        adapter = KugouPlatformAdapter()
+        settings = {"target_format_kgma": target_format, "key_file": str(key_path)}
+    elif platform_id == "netease":
+        source = tmp_path / "local_e2e.ncm"
+        _write_ncm_fixture(source, payload)
+        adapter = NeteasePlatformAdapter()
+        settings = {"target_format_ncm": target_format}
+    else:
+        source = tmp_path / "local_e2e.kwm"
+        _write_kwm_fixture(source, payload)
+        adapter = KuwoPlatformAdapter()
+        settings = {"target_format_kwm": target_format}
+
+    output_path = _run_batch_to_format(tmp_path, monkeypatch, platform_id, adapter, source, settings, target_format)
+
+    _assert_decodable_audio(output_path, ffmpeg_path)
