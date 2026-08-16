@@ -1,3 +1,5 @@
+
+
 ﻿<div align="center">
 
 # QKKDecrypt | QQ 酷狗网易云音乐解密工具
@@ -113,7 +115,7 @@ npm run package
 当前需要特别注意：
 - `PySide6`
 - `PySide6-Fluent-Widgets`
-- `FFmpeg`
+- `FFmpeg`（控制台打包要求 `ffmpeg-win-x86_64-v7.1.exe`）
 - 其他运行期依赖和打包依赖
 
 ## 致谢
